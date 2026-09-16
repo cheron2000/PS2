@@ -1,37 +1,72 @@
-# Solution Draft — v1
+# Solution Draft — v2
 Status: IN-PROGRESS
-Last edited by: Claude, round 1
+Last edited by: AstraSR, round 1
 
 ## Problem Restatement
-SIH26142 (NTRO): build a deep-learning super-resolution framework that takes medium-resolution satellite imagery (10m Sentinel-2) and produces sharper, information-rich output (<4m), while preserving geospatial and spectral consistency. Must include pre-processing, training on paired datasets, accuracy assessment, and validation against real high-resolution reference imagery — and must explicitly manage uncertainty, since some reconstructed detail is inferred, not observed.
+SIH26142 (NTRO): build a deep-learning super-resolution framework that takes medium-resolution Sentinel-2 imagery (10m bands, with 20m bands as an extension) and produces a sharper product targeting <4m GSD while preserving geospatial and spectral consistency. The solution must include pre-processing, paired-data training, quantitative accuracy assessment, validation against real high-resolution references, and explicit uncertainty management because reconstructed details are partly inferred.
 
 ## Proposed Approach
-- Input: Sentinel-2 L2A, starting with the 10m bands (RGB + NIR), extending to 20m bands (SWIR) as a stretch goal.
-- Hybrid backbone inherited from the team's prior AegisSRM design: a CNN high-order-attention stage (MHAN-style) for local texture/edge recovery, feeding a transformer cross-stage fusion stage (SPIFFNet-style) for long-range context.
-- Output: super-resolved image at <4m GSD **plus an explicit per-pixel uncertainty/confidence map** — this second output is not optional decoration, it's a direct response to the PS's uncertainty requirement, and most baseline SR papers skip it.
+- Input: Sentinel-2 L2A surface-reflectance imagery. Start with the four 10m bands (B2/B3/B4/B8); extend to 20m bands after the core pipeline is stable.
+- Use a **benchmark-driven hybrid reconstruction model** rather than claiming that MHAN+SPIFFNet is intrinsically state of the art. A lightweight CNN/high-order-attention stage handles local texture and a transformer fusion stage handles broader context.
+- Add an optional diffusion refinement branch only if controlled ablation demonstrates a measurable benefit on real Sentinel-2 benchmarks. DiffFuSR is particularly relevant prior art because it targets all 12 Sentinel-2 L2A bands and 2.5m GSD using diffusion plus learned multispectral fusion.
+- Produce the SR image **and a calibrated uncertainty/confidence product**. Uncertainty should be evaluated against observable failure modes such as hallucination, spectral inconsistency, and spatial misalignment, rather than treated as a generic extra channel.
 
 ## Technical Architecture
-1. Shallow feature extraction (conv stem)
-2. MHAN-style high-order attention blocks — local high-frequency detail
-3. SPIFFNet-style transformer blocks (cross-spatial pixel integration + cross-stage feature fusion) — global context
-4. Sub-pixel convolution upsampling head → target GSD
-5. Auxiliary uncertainty head (candidate methods: MC-dropout, heteroscedastic variance loss, or a small diffusion-based ensemble — **unresolved, see Open Questions**)
+1. Sentinel-2 L2A ingestion, cloud/mask handling, reflectance normalization, and band-wise resampling.
+2. Geospatial co-registration / quality filtering for every LR-HR pair; avoid naive pixel-wise loss on weakly aligned cross-sensor pairs.
+3. Shallow convolutional feature extraction.
+4. MHAN-style high-order attention blocks for local high-frequency structure.
+5. SPIFFNet-style cross-spatial/cross-stage transformer fusion for wider context.
+6. Reconstruction and upsampling head.
+7. Optional diffusion refinement branch, activated only after ablation against the deterministic baseline.
+8. Uncertainty head, preferably calibrated against validation residuals and benchmark correctness metrics.
+9. Geospatial output writer preserving CRS, transform, band metadata, and reflectance units.
+
+## Evaluation Protocol
+Do not judge success primarily by visual sharpness or PSNR/SSIM.
+
+Use a held-out-site/held-out-pair protocol and report:
+- reflectance consistency;
+- spectral consistency, including spectral-angle error;
+- spatial alignment;
+- synthesis/high-frequency detail;
+- hallucination and omission rates;
+- improvement/correct-detail rate;
+- conventional reconstruction metrics such as PSNR/SSIM where an aligned HR reference is available;
+- uncertainty calibration/error correlation.
+
+The public **OpenSR-test** framework provides a real-Sentinel-2-oriented evaluation protocol spanning reflectance, spectral, spatial, synthesis, hallucination, omission, and improvement metrics. It should be adopted or reproduced as the primary evaluation layer where compatible. This is important because OpenSR research shows that stronger spatial synthesis can trade off against spectral fidelity.
 
 ## Novelty / Differentiation
-- Explicit, PS-mandated uncertainty output rather than a bare enhanced image — this is the one thing that directly answers "the system... must clearly manage uncertainty" in a way a plain SR model doesn't.
-- Positions the project alongside real prior art: ESA's OpenSR initiative is explicitly framed around "robust, accountable super-resolution for Sentinel-2" — worth studying as both validation that this angle matters and as a benchmark to differentiate against.
+The defensible novelty is **trustworthy SR rather than an unverified claim of a novel backbone**:
+- spectral/geospatial consistency is treated as a hard design objective;
+- uncertainty is calibrated and linked to hallucination/error risk;
+- evaluation explicitly separates useful detail from invented detail;
+- architecture selection is empirical, with deterministic and diffusion variants compared under the same protocol;
+- the system should expose confidence/quality metadata alongside the SR product.
+
+MHAN is established remote-sensing SR prior art, and SPIFFNet is established transformer-based RSISR prior art. They should therefore be described as components/baselines rather than as novelty by themselves. DiffFuSR is a 2025 Sentinel-2-specific diffusion pipeline and must be considered in the comparison set.
 
 ## Feasibility & Data Sources
-Real, freely accessible paired datasets (not synthetic-only):
-- **SEN2VENµS** (Zenodo 6514159 / HuggingFace tacofoundation/sen2venus) — Sentinel-2 10/20m paired with VENµS 5m reference, same-day acquisition, 29 sites, ~133k patches. Lowest misalignment risk of the options here.
-- **SEN2NAIP** (Nature Sci. Data, 2024) — 2,851 real Sentinel-2/NAIP pairs + 35k synthetic S2-like pairs. Largest volume, but NAIP coverage is US-only — geography mismatch if judges want India-specific validation.
-- **WorldStrat** (NeurIPS 2022) — Sentinel-2 + SPOT 6/7 (1.5m), globally distributed.
-- **MuS2** — Sentinel-2 + WorldView-2 real-world multi-image benchmark.
+- **SEN2VENµS**: same-day, spatially registered Sentinel-2/VENµS pairs across 29 locations, with 132,955 patches and 5m references for eight Sentinel-2 bands. This is a strong supervised dataset for 10/20m → 5m experiments.
+- **OpenSR-test datasets**: real-world benchmark data including Venµs, NAIP, SPOT, Spain Crops, and Spain Urban, designed to reduce spatial/spectral misalignment and evaluate correctness beyond conventional SR metrics.
+- **WorldStrat / SEN2NAIP** can be used as additional data where licensing and alignment are appropriate, but cross-sensor pairs require explicit registration/quality control.
 
-**Known hard problem, not a footnote:** cross-sensor pairs (WorldStrat, SEN2NAIP's real subset) are only *weakly* aligned — different sensors, different passes. A SEN2NAIP-adjacent paper states this plainly: such datasets "are not suitable to train conventional SR models" without correction. This needs an explicit co-registration step or a training method that's robust to misalignment (e.g., flow/bridge-matching approaches) — not a naive pixel-wise supervised loss.
+**Resolution caveat:** SEN2VENµS directly validates 5m reconstruction, not <4m. A credible <4m claim therefore requires an additional sub-4m reference/benchmark or must be presented explicitly as an extrapolation rather than as directly validated performance.
 
 ## Known Risks & Open Questions
-1. **Architecture currency is unverified.** MHAN (2020, CNN) and SPIFFNet (2023, transformer) are solid but not the newest word — diffusion-based RSISR methods (EDiffSR, arXiv 2310.19288; DiffFuSR, arXiv 2506.11764) claim to beat CNN/GAN-era methods on perceptual quality. Nobody has benchmarked our hybrid against these yet. **Assign this to round 2.**
-2. **No India-specific validation set identified.** All three main datasets above are international. PS doesn't require India-specific data, but if judges weight real-world relevance, this is a gap.
-3. **Uncertainty-head design undecided** — MC-dropout vs. heteroscedastic loss vs. diffusion ensemble each have different compute/complexity tradeoffs, not yet compared.
-4. **I (Claude, round 1) have only seen a one-line summary of the team's original AegisSRM doc, not the full write-up.** Whoever has access to the original should paste its actual architecture reasoning into the repo before later rounds assume this draft fully represents it.
+1. **No direct MHAN+SPIFFNet vs DiffFuSR comparison was found.** Do not declare a winner without an experiment.
+2. **<4m validation remains the largest data gap.** Training/evaluating only against 5m VENµS cannot substantiate a <4m claim.
+3. **Diffusion compute and inference cost need measurement.** DiffFuSR/EDiffSR provide relevant evidence, but project-specific latency/memory must be benchmarked.
+4. **Uncertainty calibration is unresolved.** Compare a practical heteroscedastic/ensemble or MC-dropout approach against held-out residuals and hallucination metrics.
+5. **India-specific validation is not yet established.** It is useful for contextual relevance but is not mandated by the PS.
+6. **The team's original AegisSRM design rationale is not fully present in this repository.** Later agents should not assume missing details.
+
+## Sources
+- SEN2VENµS dataset: https://zenodo.org/records/6514159
+- EDiffSR: https://arxiv.org/abs/2310.19288
+- DiffFuSR: https://arxiv.org/abs/2506.11764
+- SPIFFNet: https://arxiv.org/abs/2307.02974
+- MHAN: https://ieeexplore.ieee.org/document/9151234/
+- OpenSR-test: https://github.com/ESAOpenSR/opensr-test
+- OpenSR: https://opensr.eu/
