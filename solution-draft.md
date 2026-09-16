@@ -1,38 +1,81 @@
-# Solution Draft — v2
+# Solution Draft — v3
 Status: IN-PROGRESS
-Last edited by: Claude, round 2
+Last edited by: AstraSR, round 2
 
 ## Problem Restatement
-SIH26142 (NTRO): build a deep-learning super-resolution framework that takes medium-resolution satellite imagery (10m Sentinel-2) and produces sharper, information-rich output (<4m), while preserving geospatial and spectral consistency. Must include pre-processing, training on paired datasets, accuracy assessment, and validation against real high-resolution reference imagery — and must explicitly manage uncertainty, since some reconstructed detail is inferred, not observed.
+SIH26142 (NTRO): build a deep-learning super-resolution framework that takes 10m Sentinel-2 imagery and produces an enhanced product targeting <4m GSD while preserving geospatial and spectral consistency. The solution must include preprocessing, paired-data training, quantitative assessment, validation against real high-resolution references, and explicit uncertainty management because reconstructed detail is partly inferred.
 
 ## Proposed Approach
-- Input: Sentinel-2 L2A, starting with the 10m bands (RGB + NIR), extending to 20m bands (SWIR) as a stretch goal.
-- **Backbone confirmed (revised reasoning, round 2):** CNN high-order-attention stage (MHAN-style) + transformer cross-stage fusion (SPIFFNet-style), retained as PSNR/fidelity-oriented rather than switched to diffusion. See Known Risks — this was an open question in round 1 and is now resolved with evidence, not just inherited.
-- Output: super-resolved image at <4m GSD **plus a per-pixel aleatoric uncertainty map**, produced by the same network via a heteroscedastic loss (design finalized this round, see Technical Architecture).
+- Input: Sentinel-2 L2A, initially RGB+NIR 10m bands; extend to 20m/other bands after the core pipeline is stable.
+- Primary reconstruction path: CNN high-order attention + transformer cross-stage fusion, treated as a fidelity-oriented baseline rather than claimed architectural novelty.
+- Optional diffusion refinement is an experimental branch, not assumed to be superior. DiffFuSR is a key external baseline because it targets all 12 Sentinel-2 L2A bands at 2.5m GSD.
+- Output: SR image plus a calibrated per-pixel uncertainty/confidence product.
 
 ## Technical Architecture
-1. Shallow feature extraction (conv stem)
-2. MHAN-style high-order attention blocks — local high-frequency detail
-3. SPIFFNet-style transformer blocks (cross-spatial pixel integration + cross-stage feature fusion) — global context
-4. Sub-pixel convolution upsampling head → target GSD
-5. **Uncertainty head (resolved, round 2):** dual-output head predicting pixel-wise mean + variance, trained with a Gaussian or Laplacian negative-log-likelihood (NLL) loss — i.e., heteroscedastic aleatoric uncertainty. No architectural detour needed (no MC-dropout inference-time sampling, no diffusion ensemble) — just one extra output channel and a different loss term on top of the existing backbone.
-6. **Under consideration:** a light perceptual/high-frequency loss term added to the primary pixel loss, to offset the known blur tendency of pure PSNR-optimized models (see Known Risks #1) — needs an ablation, not yet decided.
+1. L2A ingestion, cloud/invalid-pixel masking, normalization and band resampling.
+2. Pair quality control and co-registration.
+3. CNN feature stem.
+4. MHAN-style local high-frequency attention.
+5. SPIFFNet-style cross-spatial/cross-stage transformer fusion.
+6. Sub-pixel reconstruction head.
+7. Heteroscedastic uncertainty head predicting mean and variance.
+8. Optional lightweight perceptual/high-frequency loss, validated by ablation.
+9. Geospatial output preserving CRS, affine transform and band metadata.
+
+## Evaluation Protocol
+Use geographically separated train/validation/test regions to prevent spatial leakage.
+
+### Primary 4x target
+Use **SEN2NAIP's real cross-sensor subset** as an external 10m → 2.5m test route. The dataset contains 2,851 Sentinel-2/NAIP pairs and deliberately represents HR NAIP at 2.5m for a 4x task. The authors apply spatial/spectral quality filtering and visual inspection. Source: https://www.nature.com/articles/s41597-024-04214-y
+
+Use the synthetic SEN2NAIP/SEN2NAIPv2 data for scalable training, but do not treat synthetic targets as equivalent to independent real-world validation.
+
+### Secondary 5m target
+Use SEN2VENµS for same-day registered 10/20m → 5m validation. This provides a useful lower-scale check with reduced cross-sensor uncertainty.
+
+### Benchmark metrics
+Report:
+- PSNR/SSIM where aligned references permit;
+- spectral-angle error and reflectance consistency;
+- spatial alignment;
+- hallucination and omission;
+- useful-detail/improvement measures;
+- uncertainty calibration and correlation with reconstruction error.
+
+OpenSR-test-style metrics should be preferred over visual inspection alone.
+
+### External baseline
+Where reproducible, compare with DiffFuSR. It reports 2.5m Sentinel-2 output and evaluation on OpenSR, making it directly relevant to the requested scale.
 
 ## Novelty / Differentiation
-- Explicit, PS-mandated uncertainty output rather than a bare enhanced image — addressed via a method with direct precedent in *satellite and drone imagery* SR specifically (not generic computer vision), which strengthens the "scientifically reliable" claim the PS asks for.
-- Backbone choice is now a justified decision, not an inherited guess: diffusion-based alternatives were evaluated and found to trade away exactly the property (pixel/spectral fidelity) that this PS explicitly requires. That reasoning itself is worth stating in the pitch — it shows judges the team evaluated the trendier option and had a specific, evidence-based reason not to chase it.
+Do not claim that MHAN+SPIFFNet itself is novel. The defensible contribution is a **trustworthy SR pipeline** combining:
+- fidelity-first reconstruction;
+- explicit uncertainty;
+- hallucination-aware evaluation;
+- spectral/geospatial consistency constraints;
+- empirical comparison of deterministic and diffusion alternatives.
 
 ## Feasibility & Data Sources
-Real, freely accessible paired datasets (unchanged from v1):
-- **SEN2VENµS** (Zenodo 6514159 / HuggingFace tacofoundation/sen2venus) — Sentinel-2 10/20m paired with VENµS 5m reference, same-day acquisition, 29 sites, ~133k patches. Lowest misalignment risk of the options here.
-- **SEN2NAIP** (Nature Sci. Data, 2024) — 2,851 real Sentinel-2/NAIP pairs + 35k synthetic S2-like pairs. Largest volume, but NAIP coverage is US-only.
-- **WorldStrat** (NeurIPS 2022) — Sentinel-2 + SPOT 6/7 (1.5m), globally distributed, known misalignment issues.
-- **MuS2** — Sentinel-2 + WorldView-2 real-world multi-image benchmark.
+- **SEN2NAIP:** 2,851 real Sentinel-2/NAIP pairs, with 10m RGBNIR input and 2.5m HR representation for a 4x task; additionally provides synthetic training data.
+- **SEN2NAIPv2:** current public release reports 62,242 LR/HR pairs and an x4 2.5m/10m synthetic setup, using blur/downsampling, reflectance harmonization and noise degradation. Source: https://huggingface.co/datasets/tacofoundation/SEN2NAIPv2
+- **SEN2VENµS:** same-day registered Sentinel-2/VENµS pairs with 5m reference data for a secondary validation scale.
+- **WorldStrat/MuS2:** optional additional benchmarks, subject to alignment and licensing checks.
 
-Cross-sensor misalignment risk (flagged in v1) still stands — unresolved, carried forward.
+### Resolution claim
+The earlier concern that the project lacked any sub-4m reference is now resolved. SEN2NAIP provides a direct 2.5m reference route for 4x Sentinel-2 SR. However, this is US-focused and cross-sensor. Therefore the evidence supports a **2.5m benchmark target**, not a universal claim that every geographic scene can reliably be reconstructed at 2.5m.
 
 ## Known Risks & Open Questions
-1. ~~Architecture currency unverified~~ **RESOLVED, round 2:** Diffusion-based RSISR methods (EDiffSR, IRSDE, SR3) were directly compared against PSNR-oriented CNN/transformer models (EDSR, RCAN, HAT-L) in the literature. Finding: diffusion models score *better* on perceptual/realism metrics (NIQE, FID) but *worse* on PSNR/SSIM — i.e., they trade pixel and spectral fidelity for "natural-looking" output, and are prone to hallucinating plausible-but-unobserved detail. One paper states plainly that current diffusion RSISR methods "fail to achieve substantial improvements in perceptual quality over CNN- and transformer-based approaches" despite longer inference time. Since the PS explicitly demands *preserved geospatial and spectral consistency* and *scientific reliability* — not just visual sharpness — a PSNR-oriented CNN+transformer backbone (our MHAN+SPIFFNet direction) is the better-justified choice, not diffusion. **New sub-risk surfaced by this finding:** PSNR-optimized models (e.g., HAT-L in the comparison) are noted to produce visibly blurry output — worth an ablation on adding a light perceptual loss term without going as far as full diffusion.
-2. **Still open:** No India-specific validation set identified. All three main datasets are international.
-3. ~~Uncertainty-head design undecided~~ **RESOLVED, round 2:** Heteroscedastic aleatoric uncertainty via Gaussian/Laplacian NLL loss, predicting pixel-wise mean + variance in one forward pass. Directly precedented in two satellite/drone-imagery-specific SR papers (Valsesia & Magli 2021 on satellite image SR; SU-ESRGAN 2025 on satellite/drone SR with fine-tuning). Cheaper than MC-dropout (no repeated stochastic inference) and far cheaper than a diffusion ensemble. Epistemic uncertainty (MC-dropout) is a possible stretch addition, not required for the core deliverable.
-4. **Not yet independently reviewed.** Everything in this draft, round 1 and round 2, has come from Claude alone — no second model has weighed in yet. Treat both "resolved" items above as well-evidenced, not as settled community consensus, until another agent checks them.
+1. **Architecture comparison:** literature supports testing diffusion rather than assuming it wins or loses. DiffFuSR is directly relevant and should be an external baseline.
+2. **Cross-sensor domain gap:** SEN2NAIP's 2.5m real pairs are valuable but not same-sensor and are US-focused.
+3. **Synthetic-data bias:** training on S2-like synthetic degradation can produce a model that performs well on its generator but transfers poorly to real Sentinel-2.
+4. **Uncertainty calibration:** heteroscedastic variance is practical, but calibration must be measured on held-out real data.
+5. **India/generalization:** no India-specific validation is currently established. This is a generalization gap, not a reason to claim the method fails.
+6. **Perceptual loss:** adding perceptual/high-frequency loss may improve sharpness while harming spectral fidelity, so it must be ablated rather than assumed beneficial.
+
+## Sources
+- SEN2NAIP: https://www.nature.com/articles/s41597-024-04214-y
+- SEN2NAIPv2: https://huggingface.co/datasets/tacofoundation/SEN2NAIPv2
+- DiffFuSR: https://arxiv.org/abs/2506.11764
+- OpenSR: https://opensr.eu/
+- OpenSR-test: https://github.com/ESAOpenSR/opensr-test
+- SEN2VENµS: https://zenodo.org/records/6514159
