@@ -1,6 +1,6 @@
-# Solution Draft — v4
+# Solution Draft — v5
 Status: IN-PROGRESS
-Last edited by: Sonnet5, round 2
+Last edited by: Claude, round 3
 
 ## Problem Restatement
 SIH26142 (NTRO): build a deep-learning super-resolution framework that takes 10m Sentinel-2 imagery and produces an enhanced product targeting <4m GSD while preserving geospatial and spectral consistency. The solution must include preprocessing, paired-data training, quantitative assessment, validation against real high-resolution references, and explicit uncertainty management because reconstructed detail is partly inferred.
@@ -8,7 +8,7 @@ SIH26142 (NTRO): build a deep-learning super-resolution framework that takes 10m
 ## Proposed Approach
 - Input: Sentinel-2 L2A, initially RGB+NIR 10m bands; extend to 20m/other bands after the core pipeline is stable.
 - Primary reconstruction path: CNN high-order attention + transformer cross-stage fusion, treated as a fidelity-oriented baseline rather than claimed architectural novelty.
-- Optional diffusion refinement is an experimental branch, not assumed to be superior. DiffFuSR is a key external baseline because it targets all 12 Sentinel-2 L2A bands at 2.5m GSD.
+- Optional diffusion refinement is an experimental branch, not assumed to be superior — see Known Risks #1 and #7 for why this needs care, not just a benchmark run.
 - Output: SR image plus a calibrated per-pixel uncertainty/confidence product.
 
 ## Technical Architecture
@@ -44,16 +44,18 @@ Report:
 
 OpenSR-test-style metrics should be preferred over visual inspection alone.
 
-### External baseline
-Where reproducible, compare with DiffFuSR. It reports 2.5m Sentinel-2 output and evaluation on OpenSR, making it directly relevant to the requested scale.
+### External baselines (revised, round 3 — see Known Risks #7)
+Two published Sentinel-2-specific diffusion models are directly relevant and should both be treated as prior art to cite and, where feasible, benchmark against — not just "an external baseline":
+- **DiffFuSR** (Sarmad et al., arXiv 2506.11764) — all-12-band Sentinel-2 SR to 2.5m, reports outperforming SOTA on fidelity/spectral consistency/hallucination suppression. **Caveat: ~170M parameters; reported inference on the order of hours per single Sentinel-2 tile (110×110km) on 4×A100 GPUs (100 DDIM steps).** Full-tile reproduction is very unlikely to be feasible on hackathon compute — treat as a numbers-from-the-paper comparison, not a from-scratch reproduction, unless patch-level inference on limited scenes is scoped down explicitly.
+- **Donike et al. 2025** ("Trustworthy Super-Resolution of Multispectral Sentinel-2 Imagery With Latent Diffusion," IEEE JSTARS) — **this is the closest existing prior art to our entire pitch**, not just an architecture data point. See Novelty section.
 
 ## Novelty / Differentiation
-Do not claim that MHAN+SPIFFNet itself is novel. The defensible contribution is a **trustworthy SR pipeline** combining:
-- fidelity-first reconstruction;
-- explicit uncertainty;
-- hallucination-aware evaluation;
-- spectral/geospatial consistency constraints;
-- empirical comparison of deterministic and diffusion alternatives.
+**Round 3 finding — read this before pitching "uncertainty + fidelity + hallucination-awareness" as the differentiator:** Donike et al. 2025 already published, open-sourced, and pip-packaged (`opensr-model` / `opensr-utils`, github.com/ESAOpenSR) a Sentinel-2 10m→2.5m latent diffusion model that explicitly targets exactly this combination — spectral-consistency-preserving diffusion conditioned on the LR input, plus pixel-wise uncertainty maps, plus full Sentinel-2 `.SAFE` folder geospatial I/O (CRS/transform preserved). It is described as "the first multispectral RS super-resolution diffusion model efficient enough to process large-scale RS datasets... the only model providing a pixel-wise uncertainty metric" as of its publication. This is an ESA-affiliated team; given NTRO/ISRO judges for a Space Technology PS are plausibly aware of ESA's OpenSR initiative, not citing this paper is a real risk — a judge asking "how is this different from OpenSR?" should not catch the team flat-footed.
+
+This does not mean the project has no room — it means the differentiation claim needs to be rewritten around what's actually still open, honestly:
+- **India-geography validation** (Cartosat-2S/3 via Bhoonidhi, below) — not something OpenSR's published work targets.
+- **Compute-tier comparison** — a lighter CNN+transformer path as a lower-compute alternative to a ~170M-parameter diffusion pipeline, explicitly positioned as "when you don't have 4×A100s," could be a legitimate, honestly-scoped contribution rather than a fidelity claim.
+- **A comparative empirical study** (our backbone vs. DiffFuSR's reported numbers vs. OpenSR's approach) is itself a defensible hackathon-scale contribution — "we benchmarked the existing state of the art against a lighter alternative on Indian data" is a real, honest story. "We invented uncertainty-aware SR for satellites" is not, anymore.
 
 ## Feasibility & Data Sources
 - **SEN2NAIP:** 2,851 real Sentinel-2/NAIP pairs, with 10m RGBNIR input and 2.5m HR representation for a 4x task; additionally provides synthetic training data.
@@ -68,17 +70,22 @@ Do not claim that MHAN+SPIFFNet itself is novel. The defensible contribution is 
 The earlier concern that the project lacked any sub-4m reference is now resolved. SEN2NAIP provides a direct 2.5m reference route for 4x Sentinel-2 SR. However, this is US-focused and cross-sensor. Therefore the evidence supports a **2.5m benchmark target**, not a universal claim that every geographic scene can reliably be reconstructed at 2.5m.
 
 ## Known Risks & Open Questions
-1. **Architecture comparison:** literature supports testing diffusion rather than assuming it wins or loses. DiffFuSR is directly relevant and should be an external baseline.
+1. **Architecture comparison (revised, round 3):** Not a settled "CNN beats diffusion" or vice versa. Generic RSISR diffusion models (EDiffSR etc., benchmarked on UCMerced/AID) do trade fidelity for perceptual realism. But domain-specialized, Sentinel-2-specific diffusion models (DiffFuSR, Donike et al. 2025) explicitly report *strong* fidelity and hallucination-suppression, not the generic tradeoff. The real constraint is compute (#7 below), not architecture quality.
 2. **Cross-sensor domain gap:** SEN2NAIP's 2.5m real pairs are valuable but not same-sensor and are US-focused.
 3. **Synthetic-data bias:** training on S2-like synthetic degradation can produce a model that performs well on its generator but transfers poorly to real Sentinel-2.
 4. **Uncertainty calibration:** heteroscedastic variance is practical, but calibration must be measured on held-out real data.
-5. **India/generalization (updated, round 2):** ISRO's Cartosat-2S/3, accessible via the Bhoonidhi portal, provide a credible Indian-geography sub-4m source — this answers the "does one exist" question raised since round 1. What remains open: Cartosat access is order/licence-based rather than instant download, no ready-made Cartosat↔Sentinel-2 paired dataset currently exists, and building one is unverified new work — order lead time and pairing effort should be checked early rather than assumed feasible within a hackathon timeline. This is a logistics/engineering gap now, not a data-existence gap.
+5. **India/generalization:** ISRO's Cartosat-2S/3, accessible via the Bhoonidhi portal, provide a credible Indian-geography sub-4m source. What remains open: Cartosat access is order/licence-based rather than instant download, no ready-made Cartosat↔Sentinel-2 paired dataset currently exists, and building one is unverified new work — order lead time and pairing effort should be checked early rather than assumed feasible within a hackathon timeline. This is a logistics/engineering gap now, not a data-existence gap.
 6. **Perceptual loss:** adding perceptual/high-frequency loss may improve sharpness while harming spectral fidelity, so it must be ablated rather than assumed beneficial.
+7. **Prior-art overlap (new, round 3) — the most important open item right now:** Donike et al. 2025 / ESA's open-sourced `opensr-model` already does Sentinel-2 10m→2.5m latent diffusion with pixel-wise uncertainty and preserved spectral consistency. The team needs an explicit answer to "how is this different from OpenSR" before this goes in front of judges — see Novelty section for the honest options. This is a research/positioning task, not a coding task, and should be the next agent's top priority.
+8. **Diffusion compute cost:** DiffFuSR reports ~170M parameters and on the order of hours of inference per full Sentinel-2 tile on 4×A100 GPUs. Any diffusion component in the team's own pipeline (not just benchmarking) needs a realistic compute-budget check against actual available hardware (Colab/Kaggle-tier GPU, most likely) before being scoped as a build target rather than a numbers-from-the-paper comparison.
 
 ## Sources
 - SEN2NAIP: https://www.nature.com/articles/s41597-024-04214-y
 - SEN2NAIPv2: https://huggingface.co/datasets/tacofoundation/SEN2NAIPv2
 - DiffFuSR: https://arxiv.org/abs/2506.11764
+- DiffFuSR code: https://github.com/NorskRegnesentral/DiffFuSR
+- Donike et al. 2025, "Trustworthy Super-Resolution of Multispectral Sentinel-2 Imagery With Latent Diffusion," IEEE JSTARS 18, pp. 6940-6952, DOI 10.1109/JSTARS.2025.3542220
+- opensr-model (Donike et al. implementation): https://github.com/ESAOpenSR/opensr-model
 - OpenSR: https://opensr.eu/
 - OpenSR-test: https://github.com/ESAOpenSR/opensr-test
 - SEN2VENµS: https://zenodo.org/records/6514159
