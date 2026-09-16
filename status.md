@@ -1,15 +1,19 @@
 ---
-round: 2
-draft_version: 4
+round: 3
+draft_version: 5
 terminate: false
 votes_this_round:
-  claude: pending
+  claude: NEEDS-REVISION
   astrasr: pending
-  sonnet5: NEEDS-REVISION
+  sonnet5: pending
 ---
 
-Next to act: next listed agent (claude or astrasr, to review v4)
-Last draft change: Sonnet5, round 2, sections: Feasibility & Data Sources, Known Risks & Open Questions, Sources
-Note: status.md had fallen out of sync with solution-draft.md before this update — AstraSR's round-2 edits (v2→v3) and vote weren't reflected here yet. This update also corrects that: draft_version now matches solution-draft.md's actual header, and AstraSR's NEEDS-REVISION vote from log/round-02-astrasr.md is folded in below (reset to pending along with everyone else's, since this turn edited the draft again).
-Open disagreements: No direct head-to-head evidence establishes MHAN+SPIFFNet over current Sentinel-2-specific diffusion methods (unchanged, though round 2 added supporting citations). The <4m validation gap is resolved (SEN2NAIP 2.5m, MuS2 3.3m). India/generalization gap now has a named candidate source (Cartosat-2S/3 via Bhoonidhi) but its access lead time and pairing-pipeline effort are unverified — see solution-draft.md v4.
-Standing question for the next agent: diffusion inference-cost measurement, uncertainty-calibration validation on held-out real data, and whether Bhoonidhi's Cartosat order lead time is realistic within the hackathon timeline. Also: this repo's history briefly forked across two concurrent sessions (see log/round-02-sonnet5.md) — treat v4 as needing a fresh full read rather than a diff against v3.
+Next to act: astrasr or sonnet5 (review v5)
+Last draft change: Claude, round 3, sections: Proposed Approach, External Baselines, Novelty/Differentiation, Known Risks (#1 revised, #7 and #8 added), Sources
+Round counter corrected: was stuck at "round: 2" through v2→v3→v4 despite votes resetting each time per AGENTS.md's own rule. Now incremented to 3 to match actual state — please keep incrementing on every draft edit going forward, not just periodically.
+
+Open disagreements: none yet on round 3's content specifically (too new).
+
+Standing question for the next agent (this is now the top-priority item): Donike et al. 2025 / ESA's open-sourced `opensr-model` already does Sentinel-2 10m→2.5m diffusion SR with pixel-wise uncertainty — very close to this project's core pitch. Solution-draft.md's Novelty section lays out three honest differentiation paths (India/Cartosat validation, compute-tier alternative for teams without 4xA100s, comparative benchmark study). This needs a team decision, not another agent picking on their behalf — but it's fair game to research each path's feasibility further so the human team has real information to decide with.
+
+Separate note, not blocking: possible agent-identity overlap — "claude" (this repo's original agent) and "sonnet5" may be the same underlying model (Claude Sonnet 5) run through different interfaces, which would mean two of three "independent" reviewers aren't actually independent. Worth the human team confirming what model each of "astrasr" and "sonnet5" actually is and recording it in AGENTS.md's Participants table (still unfilled as of this round).
