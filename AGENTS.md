@@ -16,7 +16,7 @@ This repo is a shared workspace where **multiple different AI models act as an i
 /solution-draft.md      ← the ONE living document all agents refine together
 /status.md              ← machine-parseable round/vote state (YAML frontmatter + notes)
 /log/
-   round-01.md           ← append-only, one file per round
+   round-01.md           ← append-only, one file per round (or per agent-per-round, see note)
    round-02.md
    ...
 /research/
@@ -25,20 +25,21 @@ This repo is a shared workspace where **multiple different AI models act as an i
 
 Nothing outside `solution-draft.md`, `status.md`, `/log/`, and `/research/` should change during a run.
 
+**In practice** (observed round 2 onward): agents have been writing their own `log/round-<n>-<agent>.md` and `research/<Agent>-round-<n>.md` files rather than one shared file per round. That's fine and arguably better — keep doing that; just make sure `status.md` reflects everyone's latest vote regardless of which file it's logged in.
+
 ---
 
 ## Participants
 
-List every agent taking part before round 1 starts, so everyone knows who has to agree for the loop to end.
+**Current roster (filled in round 3 — this was sitting as template placeholder text through rounds 1–2, which is its own lesson: check this table matches status.md's `votes_this_round` keys before assuming the loop is tracking who you think it's tracking).**
 
-| Agent (model)        | GitHub identity used | Notes                        |
-|-----------------------|-----------------------|-------------------------------|
-| e.g. Gemini 2.5 Pro    | gemini-bot            |                                |
-| e.g. Llama 3.3 70B (Groq) | groq-llama-bot     |                                |
-| e.g. DeepSeek-R1       | deepseek-bot          |                                |
-| e.g. Claude            | claude-bot            |                                |
+| Agent (identity used in status.md) | Underlying model | Notes |
+|---|---|---|
+| `claude` | Claude (this chat session, Anthropic) | Rounds 1–3 so far |
+| `sonnet5` | **Unconfirmed — likely Claude Sonnet 5 via a separate session/interface** | If this is correct, `claude` and `sonnet5` are the same underlying model run twice, which weakens the "independent model" premise of this whole protocol. Team should confirm and note the actual model here. |
+| `astrasr` | Unconfirmed — name suggests a custom persona/wrapper, not a base model name | Team should confirm and note the actual underlying model here (e.g. GPT-4-class, Gemini, Llama, etc.) |
 
-Fill this table in `status.md`, not here — this file is the protocol, not the run state.
+Update this table whenever an agent joins — it's the durable roster; `status.md` only needs to track the *current round's* votes against these same identity keys.
 
 ---
 
@@ -49,7 +50,7 @@ A **round** = every listed agent takes exactly one turn, in a fixed order. Turns
 Each agent, on its turn, does the following **in order**:
 
 ### 1. Orient
-Read, in this order: `status.md` (what round is it, what did the last agent say, what's still open), `solution-draft.md` (current state of the solution), the most recent 1–2 files in `/log/` (recent critiques/votes — don't reread the whole history every time).
+Read, in this order: `status.md` (what round is it, what did the last agent say, what's still open), `solution-draft.md` (current state of the solution — a full fresh read if status.md says the history forked or the round has had multiple edits, not just a diff against what you last saw), the most recent 1–2 files in `/log/` (recent critiques/votes — don't reread the whole history every time).
 
 ### 2. Identify the gap
 Before researching anything, write down (in your own head, not the repo) what specifically is weak, unsupported, missing, or contested in the *current* draft. Don't research the whole topic from scratch each round — research the open question.
@@ -64,7 +65,7 @@ In your log entry, state plainly what you think is wrong or weak in the current 
 If your research changes the picture, edit `solution-draft.md` directly. Keep edits scoped to the section(s) your research actually informs — don't rewrite the whole document every round. Bump the version number in the draft's header.
 
 ### 6. Log and vote
-Append a new entry to the current round's file in `/log/` using the template below, ending in a vote: `READY` or `NEEDS-REVISION`. Then update `status.md`: your vote, and whether you changed the draft version.
+Append a new entry (your own file is fine, see Repo Structure note) using the template below, ending in a vote: `READY` or `NEEDS-REVISION`. Then update `status.md`: your vote, and whether you changed the draft version. **Also bump `status.md`'s `round:` number whenever the draft version changes** — this slipped for a while (draft went v2→v3→v4 while `round:` stayed frozen at 2) and made the state file misleading. Don't let it slip again.
 
 If you changed the draft version, every other agent's vote from this round is invalidated automatically (see Termination Rule) — say so explicitly in `status.md`.
 
@@ -76,7 +77,7 @@ If you changed the draft version, every other agent's vote from this round is in
 - **Prioritize primary sources**: papers (arXiv, Papers with Code), official datasets/benchmarks named or implied by the PS, prior hackathon-winning approaches to similar problems, vendor/API docs for anything you're proposing to depend on.
 - **Every non-obvious technical claim needs a source or an explicit "(assumption, unverified)" tag.** Do not present a plausible-sounding number or method as fact without one.
 - **Don't repeat research already logged.** Check `/research/` first. If you find the same paper someone already cited, only add a note if you're adding a *new* reading of it (e.g., "the 20% figure in round 2 is for a different sensor resolution than ours — flagging").
-- **Look for reasons the current approach fails, not just reasons it works.** A round that only confirms the existing draft is a wasted round — actively try to break it: What data won't actually be available? What's the compute/time cost in reality vs. on paper? What would a judge ask that the draft doesn't answer?
+- **Look for reasons the current approach fails, not just reasons it works.** A round that only confirms the existing draft is a wasted round — actively try to break it: What data won't actually be available? What's the compute/time cost in reality vs. on paper? What would a judge ask that the draft doesn't answer? **Including: has someone already published/open-sourced almost exactly this?** That's the single highest-value thing to check and it was missed for two full rounds here — search for existing solutions to the PS itself, not just component techniques, before assuming a novelty claim holds.
 - **Keep it scoped.** One round = one or two specific open questions, not a full literature review. This also matters practically — most of you are running on free-tier rate limits.
 
 ---
@@ -85,7 +86,7 @@ If you changed the draft version, every other agent's vote from this round is in
 
 A `READY` vote must state, in one line each, what you checked:
 - Feasibility (can this actually be built with realistic data/compute?)
-- Novelty (what does this add beyond the obvious baseline approach?)
+- Novelty (what does this add beyond the obvious baseline approach — and beyond anything already published?)
 - Unresolved risk (what's the biggest remaining weakness, even in a READY draft?)
 
 If you can't fill in that third line, you haven't looked hard enough — go back to step 2.
@@ -94,7 +95,7 @@ If you can't fill in that third line, you haven't looked hard enough — go back
 
 ## Termination Rule
 
-The loop ends when, **within a single round**, every listed agent in `status.md` votes `READY` on the *same* draft version (i.e., no one edited `solution-draft.md` that round). If even one agent edits the draft or votes `NEEDS-REVISION`, a new round begins and every agent's vote resets — the whole community re-reviews the changed draft.
+The loop ends when, **within a single round**, every listed agent in `status.md` votes `READY` on the *same* draft version (i.e., no one edited `solution-draft.md` that round). If even one agent edits the draft or votes `NEEDS-REVISION`, a new round begins and every agent's vote resets — the whole community re-reviews the changed draft. **This means the round number increments on every draft edit, not periodically — see the round-3 correction note in status.md for what happens when that slips.**
 
 **Stall guard:** cap at **8 rounds**. If round 8 ends without full consensus, stop, and a human reviews `solution-draft.md` plus the open disagreements in the latest `/log/` entries and makes the final call manually. This exists so the loop can't quietly burn everyone's free-tier quota forever.
 
@@ -116,7 +117,7 @@ Last edited by: <agent>, round <n>
 ## Known Risks & Open Questions
 ```
 
-### `/log/round-<n>.md` entry (one per agent per round)
+### `/log/round-<n>-<agent>.md` entry
 ```markdown
 ## <agent name> — Round <n>
 **Draft version reviewed:** v<N>
