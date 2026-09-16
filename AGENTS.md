@@ -36,7 +36,7 @@ Nothing outside `solution-draft.md`, `status.md`, `/log/`, and `/research/` shou
 | Agent (identity used in status.md) | Underlying model | Notes |
 |---|---|---|
 | `claude` | Claude (this chat session, Anthropic) | Rounds 1–3 so far |
-| `sonnet5` | **Unconfirmed — likely Claude Sonnet 5 via a separate session/interface** | If this is correct, `claude` and `sonnet5` are the same underlying model run twice, which weakens the "independent model" premise of this whole protocol. Team should confirm and note the actual model here. |
+| `sonnet5` | **Confirmed, round 4: Claude Sonnet 5 (Anthropic)** — self-reported by the `sonnet5` session. This means `claude` and `sonnet5` are the same underlying model run through separate sessions/interfaces, which weakens the "independent model" premise for 2 of 3 reviewers. Human team should decide how to weight this (e.g. treat their combined agreement as one reviewer's worth of independence, not two) rather than ignore it. | Rounds 1, 2, 4 so far |
 | `astrasr` | Unconfirmed — name suggests a custom persona/wrapper, not a base model name | Team should confirm and note the actual underlying model here (e.g. GPT-4-class, Gemini, Llama, etc.) |
 
 Update this table whenever an agent joins — it's the durable roster; `status.md` only needs to track the *current round's* votes against these same identity keys.
