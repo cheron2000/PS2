@@ -1,18 +1,27 @@
 ---
 round: 8
-draft_version: 10
+draft_version: 11
 terminate: false
 votes_this_round:
-  claude: pending
-  astrasr: NEEDS-REVISION
+  claude: NEEDS-REVISION
+  astrasr: pending (needs to re-review v11)
   sonnet5: pending
 ---
 
-Next to act: claude or sonnet5 (review v10)
-Last draft change: Claude, round 6 edit, sections: Downstream-task utility subsection, Known Risk #10.
+Next to act: Sonnet5 (review v11 — last scheduled turn of the stall-guard round)
 
-Round 7 AstraSR finding: the current ESAOpenSR ecosystem now includes SEN2SR/SEN2SRLite (including a Mamba-based model and 10m→2.5m variants), so the external-baseline section is slightly stale. AstraSR did not destructively rewrite v10 because the connector response was truncated and whole-file replacement could risk losing content. Required scoped change for round 8 review: add SEN2SR/SEN2SRLite as a current Sentinel-2-specific baseline, especially for any lightweight/compute-efficiency claim.
+Last draft change: Claude, round 8, sections: External Baselines (added SEN2SR/SEN2SRLite per AstraSR's round 7 request), Novelty/Differentiation (sharpened conclusion — path A is now the essentially sole viable differentiator, not one of three options), Known Risk #1 (extended), Known Risk #11 (new), Sources.
 
-Open disagreements: baseline completeness. The core feasibility and India-ground-truth differentiation assessment remains unchanged.
+**THIS IS THE FINAL SCHEDULED ROUND per AGENTS.md's 8-round stall guard.**
 
-Round 8 is the protocol stall-guard round. If this round does not reach full READY consensus on v10, stop the automated deliberation and have the human team make the final call, per AGENTS.md.
+After Sonnet5's turn: if Sonnet5 votes READY on v11 with no further edit, and AstraSR's outstanding round-7 concern is satisfied by the SEN2SR addition, treat this as consensus and mark `terminate: true`. If Sonnet5 finds a new gap and edits again, or if full agreement still isn't reached, **stop the automated loop here per AGENTS.md — do not open a round 9.** Human review of v11 and the open items below is the next step either way.
+
+Open disagreements: none on substance. All three agents have independently converged on India/Cartosat ground-truth validation as the differentiator across rounds 3–8.
+
+Unresolved items for the human team, not further agent research:
+1. Commit to path A (India ground-truth validation) as the actual build target.
+2. Place a real Bhoonidhi/NSIL test order early — cost and eligibility are known (round 4), turnaround genuinely isn't published anywhere and needs a direct ask.
+3. Decide compute tier / which existing package (SEN2SR, SEN2SRLite, or the team's own MHAN+SPIFFNet pipeline) to build on vs. benchmark against, now that path B is closed as a novelty claim.
+4. Scope one downstream-task check (ESA WorldCover primary; GeoSR-Bench if its release stabilizes) into the evaluation plan.
+
+Separate note, not blocking (carried from rounds 3–8): confirmed — "sonnet5" is Claude Sonnet 5, same underlying model as "claude." "astrasr"'s underlying model is still unconfirmed. Worth the human team weighing this when judging how independent this consensus really is — two of three reviewers likely share the same base model.
