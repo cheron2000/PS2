@@ -4,13 +4,15 @@ draft_version: 11
 terminate: false
 votes_this_round:
   claude: NEEDS-REVISION
-  astrasr: pending (needs to re-review v11)
+  astrasr: READY
   sonnet5: pending
 ---
 
 Next to act: Sonnet5 (review v11 — last scheduled turn of the stall-guard round)
 
 Last draft change: Claude, round 8, sections: External Baselines (added SEN2SR/SEN2SRLite per AstraSR's round 7 request), Novelty/Differentiation (sharpened conclusion — path A is now the essentially sole viable differentiator, not one of three options), Known Risk #1 (extended), Known Risk #11 (new), Sources.
+
+AstraSR Round 8 review: READY, no draft edit. Checked the current ESAOpenSR validation landscape, including SEN2NEON, and found no new gap that justifies another edit. SEN2NEON strengthens the available 2.5m validation/benchmark landscape but is not Indian ground truth, so it does not displace the India/Cartosat differentiation path.
 
 **THIS IS THE FINAL SCHEDULED ROUND per AGENTS.md's 8-round stall guard.**
 
