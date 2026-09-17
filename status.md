@@ -1,20 +1,20 @@
 ---
-round: 6
-draft_version: 9
+round: 7
+draft_version: 10
 terminate: false
 votes_this_round:
-  claude: pending
+  claude: NEEDS-REVISION
   astrasr: pending
-  sonnet5: NEEDS-REVISION
+  sonnet5: pending
 ---
 
-Next to act: claude or astrasr (review v9)
-Last draft change: Sonnet5, round 5→6 edit, sections: Evaluation Protocol (new "Downstream-task utility" subsection), Known Risks (#10, new), Sources.
+Next to act: astrasr or sonnet5 (review v10)
+Last draft change: Claude, round 6 edit, sections: Downstream-task utility subsection, Known Risk #10.
 
-Round note: Sonnet5 edited v8→v9 during its round 5 turn, so per the Termination Rule this invalidates Claude's and AstraSR's existing votes on v8 (claude was NEEDS-REVISION, astrasr was READY) and starts round 6. This is not a rejection of their convergence on the novelty/differentiation question — that content is untouched. It's an additive finding: no round had checked whether the draft addresses the PS's explicit "interpretability and analytical utility" / classification / crop-monitoring / urban-mapping / disaster-response wording, and it didn't. See research/Sonnet5-round-5.md.
+Round note: verified (not just accepted) round 5's GeoSR-Bench hedge. Good news: it's an exact sensor-pair match (Sentinel-2→NAIP, same as SEN2NAIP). Bad news: its public HuggingFace release is currently "Upload in Progress" with a data-loading error, so it's not reliably usable today. Recommendation now: ESA WorldCover as the primary downstream-task check, GeoSR-Bench as a "recheck closer to build time" upgrade path.
 
-Open disagreements: none on substance so far — this is a completeness addition, not a competing claim. The novelty/differentiation conclusion (India ground-truth validation as priority path) and the Cartosat cost/logistics findings from rounds 3-4 stand as-is.
+Open disagreements: none.
 
-Standing question for the next agent: review v9 independently. Check whether the new "Downstream-task utility" subsection is itself well-scoped (feasible, not over-claimed — e.g. GeoSR-Bench's exact applicability to this project's resolution/sensor pair was flagged as unconfirmed, not asserted). If no new gap is found, vote READY; if the downstream-task addition itself has a problem, or a new gap exists, edit only the affected section.
+Standing note (carried, and worth taking seriously now): this repo is likely close to research-complete. AstraSR's round 5 (no edit, straight READY, explicit reasoning that further edits without a genuine gap would violate the protocol's own anti-rubber-stamp intent) and this round's finding (a verification pass, not a new open question) both point the same way. Next agent: if you don't find a genuine new gap, vote READY rather than manufacturing an edit — that's not rubber-stamping, that's the protocol working as designed.
 
-Separate note, not blocking (carried from rounds 3–4): confirmed — "sonnet5" is Claude Sonnet 5, same underlying model as "claude." "astrasr"'s underlying model is still unconfirmed. Human team should decide how to weight this when judging whether real consensus exists.
+Separate note, not blocking (carried from rounds 3–6): confirmed — "sonnet5" is Claude Sonnet 5, same underlying model as "claude." "astrasr"'s underlying model is still unconfirmed. Human team should decide how to weight this when judging whether real consensus exists — and, relatedly, should now start thinking about when to call this READY and move to actually executing (India-validation path, Bhoonidhi order, downstream-task check) rather than continuing to deliberate.
