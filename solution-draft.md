@@ -1,6 +1,6 @@
-# Solution Draft — v8
+# Solution Draft — v9
 Status: IN-PROGRESS
-Last edited by: Claude, round 4
+Last edited by: Sonnet5, round 5
 
 ## Problem Restatement
 SIH26142 (NTRO): build a deep-learning super-resolution framework that takes 10m Sentinel-2 imagery and produces an enhanced product targeting <4m GSD while preserving geospatial and spectral consistency. The solution must include preprocessing, paired-data training, quantitative assessment, validation against real high-resolution references, and explicit uncertainty management because reconstructed detail is partly inferred.
@@ -43,6 +43,13 @@ Report:
 - uncertainty calibration and correlation with reconstruction error.
 
 OpenSR-test-style metrics should be preferred over visual inspection alone.
+
+### Downstream-task utility (new, round 5 — not previously addressed in any round)
+Every evaluation item above measures image quality (fidelity, spectral consistency, hallucination/omission). None measures what the PS actually asks for in its Expected Solution: that the outcome "improve in terms of interpretability and analytical utility," explicitly naming classification, change detection, crop monitoring, urban mapping, and disaster response as target applications. Five rounds of review focused on architecture/data/novelty and missed this — it's a completeness gap in the evaluation plan, not a technical flaw in the model design.
+- **Why this can't be assumed to follow automatically from good SR metrics:** recent work (GeoSR-Bench, Li et al. 2026, arXiv 2605.00310) built a 36,000-location benchmark specifically to test this and found that improvements in standard SR fidelity metrics often do not correlate with downstream task performance gains, and the correlation can even be *negative*. A separate land-cover-segmentation study found the same decoupling (FID and human preference both failed to predict which SR output actually helped a segmentation model). This means a model can look good on PSNR/SAM/hallucination scores and still not deliver the "analytical utility" the PS asks for — or vice versa.
+- **Recommended addition, scoped to be feasible, not a new architecture:** add at least one downstream-task comparison (SR output vs. bicubic-upsampled LR vs., where available, real HR) using an existing label source aligned to the same AOIs already in the plan — e.g., ESA WorldCover (10m, global, Sentinel-1/2-derived, free, includes India) for a simple land-cover/cropland/built-up classification or segmentation check, or GeoSR-Bench directly if its AOIs/resolutions overlap with the project's chosen regions (check before assuming; its stated range is 500m–0.6m across various sensor pairs, not confirmed here to include the exact Sentinel-2 10m→2.5m/4m case). Report a downstream metric (e.g., IoU or per-class accuracy) alongside the existing image-quality metrics, not instead of them.
+- This is also a stronger, judge-facing complement to whichever differentiation path the team picks (India validation or compute-tier): "SR improves crop-boundary IoU by X%" is a more concrete answer to "why does this matter" than fidelity numbers alone, and directly answers the PS's own wording rather than a proxy for it.
+Sources: https://arxiv.org/abs/2605.00310 ; https://arxiv.org/html/2606.25128v1
 
 ### External baselines (revised, round 3 — see Known Risks #7)
 Two published Sentinel-2-specific diffusion models are directly relevant and should both be treated as prior art to cite and, where feasible, benchmark against — not just "an external baseline":
@@ -90,6 +97,7 @@ The earlier concern that the project lacked any sub-4m reference is now resolved
 7. **Prior-art overlap — the most important open item right now (updated, round 4):** Donike et al. 2025 / ESA's open-sourced `opensr-model` already does Sentinel-2 10m→2.5m latent diffusion with pixel-wise uncertainty and preserved spectral consistency (round 3). Round 4 adds: at least one other visible SIH26142 competitor (see Novelty section) has already substantially executed the "compute-tier" differentiation path with real rigor. Combined, this means neither "uncertainty-aware SR" nor "lightweight compute-tier SR" alone is a safe novelty claim anymore — the team needs an explicit answer to "how is this different," and genuine India-ground-truth validation is now the most clearly still-open option. This is a research/positioning task, not a coding task, and should be the next agent's top priority if the human team hasn't already decided.
 8. **Diffusion compute cost:** DiffFuSR reports ~170M parameters and on the order of hours of inference per full Sentinel-2 tile on 4×A100 GPUs. Any diffusion component in the team's own pipeline (not just benchmarking) needs a realistic compute-budget check against actual available hardware (Colab/Kaggle-tier GPU, most likely) before being scoped as a build target rather than a numbers-from-the-paper comparison.
 9. **No official PS dataset (confirmed, round 4):** searching specifically for SIH26142/NTRO did not surface any organizer-provided dataset or reference implementation — every public team found (including this one) is independently sourcing data from the sources in Feasibility & Data Sources above. This confirms rather than changes the current plan, but it's worth the human team double-checking the official SIH portal/problem-statement page directly in case a dataset was added after this round's search.
+10. **Downstream-task utility never evaluated (new, round 5):** the PS explicitly asks for improved "interpretability and analytical utility" and names classification, change detection, crop monitoring, urban mapping, and disaster response as target applications. Five rounds addressed image-quality metrics, novelty, and data access, but none proposed measuring whether the SR output actually helps a downstream task — and recent research (GeoSR-Bench, 2026) shows this doesn't reliably follow from good fidelity metrics, sometimes even correlating negatively. See Evaluation Protocol's new subsection for a scoped, feasible way to add this (e.g., ESA WorldCover-based land-cover/cropland classification check) without requiring new architecture.
 
 ## Sources
 - SEN2NAIP: https://www.nature.com/articles/s41597-024-04214-y
@@ -106,3 +114,6 @@ The earlier concern that the project lacked any sub-4m reference is now resolved
 - Bhoonidhi portal (ISRO/NRSC EO data hub): https://bhoonidhi.nrsc.gov.in/
 - Bhoonidhi/NSIL Commercial Products FAQ (primary source for pricing, GE/NGE eligibility, and turnaround terms): https://bhoonidhi.nrsc.gov.in/imgarchive/bhoonidhi_videos_help/Commercial_Products_FAQ.pdf
 - Bhoonidhi/NSIL pricing policy (secondary, background): https://www.nsilindia.co.in/news-details/614 ; https://aidigitalnews.com/ai/why-isros-bhoonidhi-is-on-par-with-nasas-datasets/
+- GeoSR-Bench (downstream-task SR benchmark): https://arxiv.org/abs/2605.00310
+- Land-cover segmentation / SR utility decoupling study: https://arxiv.org/html/2606.25128v1
+- ESA WorldCover: https://esa-worldcover.org/
