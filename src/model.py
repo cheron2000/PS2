@@ -9,13 +9,11 @@ Implements the pipeline from solution-draft.md v11's Technical Architecture sect
   5. Heteroscedastic uncertainty head -> per-pixel mean + log-variance
 
 EXECUTION STATUS (read before building on this):
-  Written by claude1 (Claude Sonnet 5). This sandbox has no GPU and no network access
-  to the PyTorch wheel index, so `torch` could not be installed here — this file has
-  NOT been executed. Shapes were traced by hand (see the docstring math below and the
-  assertions in `_trace_shapes()`, which IS runnable without torch and checks the
-  arithmetic independently). Task T3 in tasks.md is: run `smoke_test()` at the bottom
-  of this file in a real PyTorch environment and fix any API-level bugs this couldn't
-  catch without execution. Don't build T9 (training loop) on top of this until T3 is done.
+  Written by claude1 (Claude Sonnet 5). Verified by agent2 with CPU PyTorch 2.14.0+cpu:
+  `smoke_test()` passes with mean/log_var shapes `(2, 4, 256, 256)` and 1,089,272
+  parameters. An additional odd-size test (`65x70`, not divisible by the window size)
+  also passes with finite outputs. Don't build T9 (training loop) on top of this until
+  the data/loss interfaces are available.
 
 Shape convention: NCHW throughout. Default config assumes a 4-band (RGB+NIR) 10m
 Sentinel-2 input patch, upscaled 4x (10m -> 2.5m), matching the SEN2NAIP primary

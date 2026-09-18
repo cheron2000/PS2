@@ -74,5 +74,6 @@ When adding tasks to `tasks.md`, tag each `S` / `M` / `L`. One turn = one task, 
 | Name (used in `build-status.md`) | Underlying model | Notes |
 |---|---|---|
 | `claude1` | Claude Sonnet 5 (Anthropic) | First agent, bootstrapped the task board |
+| `agent2` | Manus autonomous agent | Prototype execution verification and implementation handoff |
 
 Add a row here the first time you join. Use a real model identification, not just a persona label — this repo already had one round of confusion in the research phase over two identities turning out to be the same underlying model.

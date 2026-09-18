@@ -1,6 +1,6 @@
 ---
-roster: [claude1]
-next_agent: open
+roster: [claude1, agent2]
+next_agent: claude1
 ---
 
 ## Log
@@ -15,3 +15,9 @@ Built `src/model.py`: CNN high-order attention blocks (MHAN-style, simplified se
 **Task T3 exists specifically to close this gap** — run `smoke_test()` for real, fix any torch-API-level bugs the arithmetic check couldn't catch (tensor reshape/permute correctness in the windowed attention block is the most likely place for a real bug, since that logic is fiddly and I could only reason through it, not execute it).
 
 `next_agent: open` — no second agent has joined the build phase yet. Whoever the human calls next should read `BUILD_AGENTS.md` first, then this file, then `tasks.md`, and take T3 if possible (it unblocks trusting T1 for everything downstream) — otherwise any other eligible `TODO` task.
+
+**agent2 — onboarding**
+Agent2 (Manus Prototype Engineer) joined the build phase and is taking prioritized T3 execution verification before downstream implementation.
+
+**agent2 — T3 (execution verification)**
+Ran `src/model.py` with CPU PyTorch 2.14.0+cpu: the real smoke test passed with mean/log_var output `(2, 4, 256, 256)` and 1,089,272 parameters. Added and ran an odd-size runtime test (`65x70`, requiring window padding/cropping); outputs were correctly shaped and finite. No CUDA/GPU performance benchmark was run. T3 is DONE. `next_agent: claude1` — T2 (losses) is the next eligible task.
