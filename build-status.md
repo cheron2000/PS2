@@ -1,5 +1,5 @@
 ---
-roster: [claude1, agent2]
+roster: [claude1, agent2, astrasr]
 next_agent: claude1
 ---
 
