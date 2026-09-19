@@ -51,10 +51,15 @@ if _HAS_TORCH:
 
         def __init__(self, channels: int, reduction: int = 8):
             super().__init__()
+            if channels <= 0:
+                raise ValueError(f"channels must be positive, got {channels}")
+            if reduction <= 0:
+                raise ValueError(f"reduction must be positive, got {reduction}")
+            reduced_channels = max(1, channels // reduction)
             self.fc = nn.Sequential(
-                nn.Conv2d(channels, channels // reduction, kernel_size=1),
+                nn.Conv2d(channels, reduced_channels, kernel_size=1),
                 nn.ReLU(inplace=True),
-                nn.Conv2d(channels // reduction, channels, kernel_size=1),
+                nn.Conv2d(reduced_channels, channels, kernel_size=1),
                 nn.Sigmoid(),
             )
 
@@ -95,6 +100,16 @@ if _HAS_TORCH:
 
         def __init__(self, channels: int, window_size: int = 8, num_heads: int = 4, mlp_ratio: float = 2.0):
             super().__init__()
+            if channels <= 0:
+                raise ValueError(f"channels must be positive, got {channels}")
+            if window_size <= 0:
+                raise ValueError(f"window_size must be positive, got {window_size}")
+            if num_heads <= 0:
+                raise ValueError(f"num_heads must be positive, got {num_heads}")
+            if channels % num_heads != 0:
+                raise ValueError(f"channels ({channels}) must be divisible by num_heads ({num_heads})")
+            if mlp_ratio <= 0:
+                raise ValueError(f"mlp_ratio must be positive, got {mlp_ratio}")
             self.window_size = window_size
             self.norm1 = nn.LayerNorm(channels)
             self.attn = nn.MultiheadAttention(embed_dim=channels, num_heads=num_heads, batch_first=True)
@@ -140,7 +155,8 @@ if _HAS_TORCH:
 
         def __init__(self, channels: int, out_channels: int, scale: int = 4):
             super().__init__()
-            assert scale in (2, 4), "only 2x or 4x supported by this head; compose for other factors"
+            if scale not in (2, 4):
+                raise ValueError("only 2x or 4x supported by this head; compose for other factors")
             steps = [2, 2] if scale == 4 else [2]
             layers = []
             in_ch = channels
@@ -196,6 +212,15 @@ if _HAS_TORCH:
             scale: int = 4,
         ):
             super().__init__()
+            for name, value in (("in_channels", in_channels), ("out_channels", out_channels),
+                                ("base_channels", base_channels), ("num_attn_blocks", num_attn_blocks),
+                                ("window_size", window_size), ("num_heads", num_heads)):
+                if value <= 0:
+                    raise ValueError(f"{name} must be positive, got {value}")
+            if base_channels % num_heads != 0:
+                raise ValueError(f"base_channels ({base_channels}) must be divisible by num_heads ({num_heads})")
+            if scale not in (2, 4):
+                raise ValueError(f"scale must be 2 or 4, got {scale}")
             self.stem = nn.Conv2d(in_channels, base_channels, kernel_size=3, padding=1)
 
             self.attn_blocks = nn.Sequential(
