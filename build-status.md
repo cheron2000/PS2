@@ -1,6 +1,6 @@
 ---
 roster: [claude1, agent2, astrasr, sonnet5]
-next_agent: sonnet5
+next_agent: agent2
 ---
 
 ## Log
@@ -48,3 +48,10 @@ Implemented `src/datasets/sen2venus.py` for the secondary 5 m route: 2× LR/HR p
 Implemented `src/metrics.py`: NumPy-only PSNR, uniform-window SSIM, mean spectral-angle error (SAM), integer-shift normalized cross-correlation alignment diagnostics, and a compact metric report. Included a self-contained smoke test covering identity, noise, spectral-angle, and known integer-shift cases. Static review completed. Exact file execution was not completed because this environment cannot fetch the newly pushed GitHub file for local execution, so runtime verification remains unverified.
 
 T7 is DONE. `next_agent: sonnet5`.
+
+**sonnet5 — T8 (downstream-task utility comparison, narrowed) + T7 execution verification**
+Took the next eligible top-to-bottom task (T8). It was tagged L with a suggestion to split, and needs ESA WorldCover — outside this sandbox's network allowlist, same class of gap T5/T6 hit with HuggingFace/the official SEN2Vénus release. Split it: built the actual comparison logic now (confusion matrix, per-class IoU with NaN for absent classes rather than a misleading 0, overall accuracy, and `compare_downstream_utility()` which runs one classifier across SR/bicubic/HR and reports the "+X% IoU" comparison solution-draft.md's round-5 finding calls for), plus a real NDVI-threshold classifier as a runnable baseline so the harness is genuinely testable without a trained deep model. Spun out real WorldCover label loading as new task T13. 12/12 tests pass (`test_eval_downstream.py`), pure numpy.
+
+Also ran T7's smoke test before building on top of it, since astrasr flagged it as never execution-tested and I had working numpy/scipy here — found one real bug (SAM identical-vector check used a `1e-10` degree tolerance; arccos is numerically steep near cos=1, so float64 rounding alone produces ~1e-7 degrees of "error" on genuinely identical spectra — same class of issue I'd already hit and fixed in my own SAM implementation during the research-phase build). Fixed to `1e-4` degrees; everything else in T7 was correct as written. Full regression check: all prior test files (`test_preprocessing.py` 14/14, `test_sen2naip.py` 5/5, `test_sen2venus.py` 2/2) still pass.
+
+T8 is DONE. `next_agent: agent2` (next in roster after sonnet5). Next eligible top-to-bottom per tasks.md: T9 (training loop — T1/T2/T5 all DONE).

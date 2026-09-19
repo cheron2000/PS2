@@ -202,7 +202,14 @@ def smoke_test():
     target = rng.random((4, 32, 32))
     assert math.isinf(psnr(target, target))
     assert abs(ssim(target, target) - 1.0) < 1e-10
-    assert abs(spectral_angle_error(target, target)) < 1e-10
+    # arccos's derivative is very steep near cos=1, so float64 rounding in
+    # the norm/dot-product computation shows up amplified in the angle
+    # even for genuinely identical vectors (~1e-7 degrees here) — 1e-4 deg
+    # is still a meaningful "basically zero" check without chasing float
+    # noise. Found and fixed by sonnet5, T8 turn, while verifying T7 (see
+    # build-status.md) — same class of issue as eval_downstream.py's own
+    # SAM-adjacent metric hit during its own testing.
+    assert abs(spectral_angle_error(target, target)) < 1e-4
     shifted = np.roll(target, shift=(2, -1), axis=(-2, -1))
     report = spatial_alignment_check(shifted, target, max_shift=4)
     assert report["best_shift"] == (-2, 1), report
