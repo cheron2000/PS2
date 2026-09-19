@@ -148,3 +148,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+\n\ndef test_normalize_rejects_nonfinite_data():\n    data = np.ones((1, 4, 4), dtype=float)\n    data[0, 0, 0] = np.nan\n    for method in ("reflectance", "percentile", "zscore"):\n        try:\n            normalize_bands(data, method=method)\n        except ValueError:\n            pass\n        else:\n            raise AssertionError(f"{method} should reject non-finite input")\n\n\ndef test_tile_rejects_invalid_min_valid_fraction():\n    data = np.zeros((1, 4, 4))\n    for threshold in (-0.1, 1.1, np.nan, np.inf):\n        try:\n            tile_into_patches(data, 2, min_valid_fraction=threshold)\n        except ValueError:\n            pass\n        else:\n            raise AssertionError(f"threshold {threshold!r} should be rejected")\n\n
