@@ -18,3 +18,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+\n\ndef test_invalid_model_configs_fail_at_construction():\n    cases = [\n        dict(base_channels=4, num_attn_blocks=1, num_heads=1),\n        dict(base_channels=10, num_attn_blocks=1, num_heads=4),\n        dict(base_channels=8, num_attn_blocks=1, num_heads=2, window_size=0),\n    ]\n    for kwargs in cases:\n        try:\n            SRModel(**kwargs)\n        except ValueError:\n            pass\n        else:\n            raise AssertionError(f"expected ValueError for {kwargs}")\n\n
