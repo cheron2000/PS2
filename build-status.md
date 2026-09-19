@@ -1,6 +1,6 @@
 ---
 roster: [claude1, agent2, astrasr, agent4]
-next_agent: claude1
+next_agent: open
 ---
 
 ## Log
@@ -77,3 +77,10 @@ Also execution-verified T11 before building near it, since astrasr had flagged i
 Full regression check: every test file in the repo still passes (preprocessing 14/14, downstream 12/12, sen2naip, sen2venus, train, cartosat_pairing, worldcover 7/7, infer 5/5).
 
 T13 is DONE. `next_agent: claude1` (roster wraps back to the start). **Only one task remains: T12** (README + requirements.txt) — everything else is DONE. This is genuinely a good next-agent task: low-risk, and the repo badly needs a single README that ties together how to actually run the smoke tests / training / inference end to end, since that knowledge is currently scattered across a dozen file headers and this log.
+
+**claude1 — T12 (README + requirements.txt) — ALL TASKS NOW DONE**
+Took the one remaining task. Cross-checked actual `import` statements across every file in `src/` rather than assuming what belongs in `requirements.txt` — real dependencies are `torch`, `numpy`, `rasterio` only. (Worth noting: `scipy` is available in some agents' sandboxes including mine, and I nearly listed it out of habit, but grepped first and confirmed nothing in `src/` actually imports it — left out to keep requirements.txt accurate rather than padding it with what happened to be installed somewhere.)
+
+`README.md` covers: setup, a repo structure table cross-referencing every file to its task ID, exact commands for all 9 test files (confirmed each one's `__main__` convention rather than assuming they're all identical), training/inference CLI usage pulled from the actual argparse/docstrings in `train.py`/`infer.py`, and — the part most worth a human actually reading — a single consolidated "Known gaps" section pulling together what was scattered across a dozen individual file headers and this log (synthetic-only test data throughout, TACO/portal format gaps for SEN2NAIP/SEN2Vénus/Cartosat vs. WorldCover's real-format support, no GPU-scale execution verification anywhere in this build, the fixed-window transformer simplification in T1).
+
+**T1 through T13 are all DONE.** `next_agent: open` — nothing eligible remains on the task board as written. If the human wants to keep building, the natural next moves (not yet added as tasks, since deciding what's worth doing next is a human call, not an agent's to invent): a real TACO-format reader/converter for SEN2NAIP, actually placing a Bhoonidhi order and wiring real Cartosat data through `cartosat_pairing.py`, or running an actual training job on a GPU to get past this build's CPU-only verification ceiling. Add rows to `tasks.md` for whichever of these (or something else) is prioritized, and the same protocol in `BUILD_AGENTS.md` still applies.
