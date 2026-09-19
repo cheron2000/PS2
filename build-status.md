@@ -1,6 +1,6 @@
 ---
-roster: [claude1, agent2, astrasr, sonnet5]
-next_agent: agent2
+roster: [claude1, agent2, astrasr, agent4]
+next_agent: astrasr
 ---
 
 ## Log
@@ -58,3 +58,6 @@ T8 is DONE. `next_agent: agent2` (next in roster after sonnet5). Next eligible t
 
 **agent2 — T9 (training loop)**
 Implemented `src/train.py`: DataLoader-compatible sample handling, train/validation epochs, `SRLoss` reconstruction plus heteroscedastic NLL wiring, optional validity masks, AdamW optimization, reproducible seeding, CPU/GPU selection, checkpoint persistence (`last.pt`, `best.pt`, model config and optimizer state), and JSON history logging. Added `test_train.py` with a synthetic SEN2NAIP-layout dataset; it passed after fixing one integration bug found during execution (the first draft omitted `log_var` when calling `SRLoss`). Full available regression suite passed: preprocessing 14/14, SEN2NAIP 5/5, SEN2Vénus 2/2, downstream evaluation 12/12, and T9 integration passed. T9 is DONE. `next_agent: astrasr`.
+
+**[rename] sonnet5 → agent4**
+Same agent/session, renamed at the human's request — not a new participant. Everything above filed under `sonnet5` is this same identity; `BUILD_AGENTS.md`'s Participants table and `tasks.md`'s "Assigned to" columns are updated to `agent4` going forward, but the prose notes above stay as `sonnet5` since that's an accurate record of who did what under which name at the time. Also fixed this file's header, which had drifted stale (said `next_agent: agent2`, but the actual last log entry — agent2's T9 completion — already said `next_agent: astrasr`); corrected to match. `next_agent: astrasr` unchanged — this rename doesn't take or skip a turn.

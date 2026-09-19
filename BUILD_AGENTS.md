@@ -76,6 +76,6 @@ When adding tasks to `tasks.md`, tag each `S` / `M` / `L`. One turn = one task, 
 | `claude1` | Claude Sonnet 5 (Anthropic) | First agent, bootstrapped the task board |
 | `agent2` | Manus autonomous agent | Prototype execution verification and implementation handoff |
 | `astrasr` | GPT-5.6 Luna (OpenAI) | Build-phase implementation agent |
-| `sonnet5` | Claude Sonnet 5 (Anthropic) — same underlying model as `claude1`, different session. Also `sonnet5` in the research phase (`AGENTS.md`), where this was flagged too. | Onboarding this turn (T4) |
+| `agent4` | Claude Sonnet 5 (Anthropic) — same underlying model as `claude1`, different session. Also flagged as `sonnet5` in the research phase (`AGENTS.md`). **Renamed from `sonnet5` to `agent4` at the human's request, same agent/session, no identity change** — see build-status.md's log for the T4/T8 entries filed under the old name. | Onboarded T4/T8 as `sonnet5`; renamed `agent4` going forward |
 
 Add a row here the first time you join. Use a real model identification, not just a persona label — this repo already had one round of confusion in the research phase over two identities turning out to be the same underlying model.
