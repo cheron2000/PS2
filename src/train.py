@@ -188,6 +188,38 @@ def build_loader(dataset: Dataset, batch_size: int = 1, shuffle: bool = True) ->
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=0)
 
 
+def split_dataset(dataset: Dataset, val_fraction: float, seed: int):
+    """Deterministic train/val split by sample index (audit finding #1 fix,
+    2026-09-19). fit() already accepted a val_loader and used it correctly
+    for best-checkpoint selection -- this CLI just never built one, so
+    "best.pt" was always selected by *training* loss, the exact failure mode
+    the audit flagged. random_split was already imported and unused; this is
+    the wiring, not new machinery.
+
+    NOTE on scope: this gives a real, reproducible-under-a-fixed-seed index
+    split, which is enough to stop training loss silently driving checkpoint
+    selection. It does NOT give a persisted, scene/AOI-aware split with a
+    manifest of which source files went where -- that's a larger piece of
+    work (the audit's proposed reproducibility/scene-split task) genuinely
+    out of scope for this fix. Two dataset instances share the same list of
+    pairs in the same order (assuming the same directory contents), so a
+    fixed seed reproduces the same index split across runs, but does not
+    yet record file-level provenance -- flagged as a follow-up, not silently
+    treated as solved.
+    """
+    if not 0.0 < val_fraction < 1.0:
+        raise ValueError(f"val_fraction must be between 0 and 1, got {val_fraction}")
+    n_val = max(1, int(len(dataset) * val_fraction))
+    n_train = len(dataset) - n_val
+    if n_train < 1:
+        raise ValueError(
+            f"val_fraction={val_fraction} leaves no training samples "
+            f"(dataset size={len(dataset)}) -- use a smaller val_fraction or more data"
+        )
+    generator = torch.Generator().manual_seed(seed)
+    return random_split(dataset, [n_train, n_val], generator=generator)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", required=True)
@@ -196,6 +228,12 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--checkpoint-dir", default="runs/sr")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--val-fraction", type=float, default=0.2,
+        help="fraction of samples held out for validation-driven checkpoint "
+             "selection (default 0.2). Pass 0 to disable and fall back to "
+             "training-loss-based selection explicitly, rather than by omission.",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -208,13 +246,27 @@ def main() -> None:
     model = SRModel(**model_config)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     criterion = SRLoss()
+
+    if args.val_fraction > 0:
+        train_subset, val_subset = split_dataset(dataset, args.val_fraction, args.seed)
+        train_loader = build_loader(train_subset, batch_size=args.batch_size, shuffle=True)
+        val_loader = build_loader(val_subset, batch_size=args.batch_size, shuffle=False)
+        print(f"train/val split: {len(train_subset)} train, {len(val_subset)} val "
+              f"(val_fraction={args.val_fraction}, seed={args.seed})")
+    else:
+        train_loader = build_loader(dataset, batch_size=args.batch_size, shuffle=True)
+        val_loader = None
+        print("WARNING: --val-fraction 0 -- best-checkpoint selection will use "
+              "TRAINING loss, not validation loss. Only do this deliberately.")
+
     fit(
         model,
-        build_loader(dataset, batch_size=args.batch_size),
+        train_loader,
         criterion,
         optimizer,
         args.epochs,
         device,
+        val_loader=val_loader,
         checkpoint_dir=args.checkpoint_dir,
         model_config=model_config,
     )
