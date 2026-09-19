@@ -173,3 +173,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+\n\ndef test_geotiff_export_rejects_missing_crs():\n    with tempfile.TemporaryDirectory() as tmpdir:\n        data = np.zeros((1, 4, 4), dtype=np.float32)\n        output_path = os.path.join(tmpdir, "unreferenced.tif")\n        try:\n            write_output(output_path, data, {"crs": None, "transform": tuple(Affine.identity())}, scale=1)\n        except ValueError as exc:\n            assert "georeferencing" in str(exc)\n        else:\n            raise AssertionError("GeoTIFF export should reject a None CRS")\n\n
