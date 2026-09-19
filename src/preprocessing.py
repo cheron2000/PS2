@@ -78,6 +78,8 @@ def normalize_bands(data: np.ndarray, method: str = "reflectance", stats: dict =
     """
     if data.ndim != 3:
         raise ValueError(f"expected (C, H, W) array, got shape {data.shape}")
+    if not np.isfinite(data).all():
+        raise ValueError("data must contain only finite values; handle nodata/cloud pixels with a validity mask before normalization")
 
     if method == "reflectance":
         normalized = np.clip(data.astype(np.float64) / 10000.0, 0.0, 1.0)
@@ -145,6 +147,8 @@ def tile_into_patches(data: np.ndarray, patch_size: int, stride: int = None,
         raise ValueError(f"patch_size and stride must be positive, got {patch_size}, {stride}")
     if validity_mask is not None and validity_mask.shape != (H, W):
         raise ValueError(f"validity_mask shape {validity_mask.shape} doesn't match data spatial shape {(H, W)}")
+    if not np.isfinite(min_valid_fraction) or not 0.0 <= min_valid_fraction <= 1.0:
+        raise ValueError(f"min_valid_fraction must be finite and in [0, 1], got {min_valid_fraction}")
 
     patches = []
     for row in range(0, H - patch_size + 1, stride):
