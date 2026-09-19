@@ -1,6 +1,6 @@
 ---
 roster: [claude1, agent2, astrasr, agent4]
-next_agent: agent4
+next_agent: claude1
 ---
 
 ## Log
@@ -68,3 +68,12 @@ Implemented `src/datasets/cartosat_pairing.py`: pre-extracted-array validation, 
 
 **astrasr — T11 (inference)**
 Implemented `src/infer.py`: checkpoint/config loading compatible with T9 `best.pt`/raw state dicts; CHW NumPy input and optional rasterio raster input; optional Sentinel-2 L2A DN→reflectance normalization; SR mean plus per-band variance from predicted log-variance; georeferenced GeoTIFF export with the affine transform scaled to the SR grid; NumPy output fallback; and a minimal PyTorch inference smoke test. Local runtime verification was not completed against the GitHub file because this environment could not fetch the repository file into the execution sandbox, so the implementation is statically reviewed and explicitly marked unverified. `next_agent: agent4` (next roster member).
+
+**agent4 — T13 (ESA WorldCover loader) + T11 execution verification**
+Took the next eligible top-to-bottom task (T13; T12 comes after it in the file). Installed rasterio (new dependency — flagged for whoever takes T12). Unlike T5/T6/T10's undocumented-portal-schema gaps, WorldCover's real product format is well-documented and stable (Cloud-Optimized GeoTIFF, fixed 11-class code scheme, public AWS S3 hosting), so `src/datasets/worldcover.py` targets the real format directly: class-code remap (raw 10-100 → consecutive 0-10 labels, required for compatibility with T8's `confusion_matrix`), real rasterio GeoTIFF read/write, and nearest-neighbor reprojection to align WorldCover onto a reference Sentinel-2/SR grid (nearest-neighbor deliberately, not bilinear — land-cover codes are categorical, interpolating them would invent nonexistent classes). 7/7 tests pass (`test_worldcover.py`), including a genuinely real GeoTIFF round-trip and reprojection test, not just numpy arrays — rasterio itself needs no network access, only fetching an actual WorldCover tile does, which remains external.
+
+Also execution-verified T11 before building near it, since astrasr had flagged it unverified and I had working torch + rasterio: the original `smoke_test()` passed clean, no bugs found. But it only checked tensor shapes, not the georeferenced export path — the fiddliest part (affine transform scaling, CRS propagation) — so I added `test_infer.py`: a full synthetic-but-real GeoTIFF → checkpoint → predict → GeoTIFF pipeline, confirming the output's pixel size is exactly input/scale with the same origin. 5/5 pass (after fixing a bug in my *own* test, not astrasr's code — I'd saved a custom-sized model's raw state dict but `load_checkpoint`'s no-config fallback reconstructs `SRModel()` at its defaults, so shapes legitimately mismatched; fixed by using default args for that specific test case). T11's implementation itself needed no changes.
+
+Full regression check: every test file in the repo still passes (preprocessing 14/14, downstream 12/12, sen2naip, sen2venus, train, cartosat_pairing, worldcover 7/7, infer 5/5).
+
+T13 is DONE. `next_agent: claude1` (roster wraps back to the start). **Only one task remains: T12** (README + requirements.txt) — everything else is DONE. This is genuinely a good next-agent task: low-risk, and the repo badly needs a single README that ties together how to actually run the smoke tests / training / inference end to end, since that knowledge is currently scattered across a dozen file headers and this log.
