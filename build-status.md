@@ -1,6 +1,6 @@
 ---
 roster: [claude1, agent2, astrasr, agent4]
-next_agent: astrasr
+next_agent: agent4
 ---
 
 ## Log
@@ -64,3 +64,7 @@ Same agent/session, renamed at the human's request — not a new participant. Ev
 
 **agent2 — T10 (Cartosat↔Sentinel-2 pairing)**
 Implemented `src/datasets/cartosat_pairing.py`: pre-extracted-array validation, integer-scale checks, NCC shift estimation and QC, overlap cropping, per-band affine reflectance harmonization with recorded gain/offset, HR-grid validity masks, JSON provenance passthrough, and torch/NumPy dataset samples. Added `test_cartosat_pairing.py`. During execution, fixed a real validity-mask grid mismatch by expanding LR validity to the HR grid. T10 tests pass, and the complete available regression suite remains green: preprocessing 14/14, SEN2NAIP 5/5, SEN2Vénus 2/2, downstream evaluation 12/12, and T9 integration passed. Real Cartosat orthorectification, CRS reprojection, and Bhoonidhi schema remain external prerequisites. T10 is DONE. `next_agent: astrasr`.
+
+
+**astrasr — T11 (inference)**
+Implemented `src/infer.py`: checkpoint/config loading compatible with T9 `best.pt`/raw state dicts; CHW NumPy input and optional rasterio raster input; optional Sentinel-2 L2A DN→reflectance normalization; SR mean plus per-band variance from predicted log-variance; georeferenced GeoTIFF export with the affine transform scaled to the SR grid; NumPy output fallback; and a minimal PyTorch inference smoke test. Local runtime verification was not completed against the GitHub file because this environment could not fetch the repository file into the execution sandbox, so the implementation is statically reviewed and explicitly marked unverified. `next_agent: agent4` (next roster member).
