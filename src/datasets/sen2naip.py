@@ -160,7 +160,9 @@ class SEN2NAIPDataset(_DatasetBase):
                  normalize_method: str = "reflectance", max_shift: int = 4,
                  min_ncc_score: float = 0.1):
         self.root = root
-        self.scale = scale
+        if isinstance(scale, bool) or not isinstance(scale, (int, np.integer)) or scale <= 0:
+            raise ValueError(f"scale must be a positive integer, got {scale!r}")
+        self.scale = int(scale)
         self.normalize_method = normalize_method
         self.max_shift = max_shift
         self.min_ncc_score = min_ncc_score
@@ -182,9 +184,25 @@ class SEN2NAIPDataset(_DatasetBase):
                 self.dropped_pairs.append((file_id, "no matching HR file"))
                 continue
 
-            lr = np.load(lr_path)
-            hr = np.load(hr_path)
-            expected_hr_shape = (lr.shape[0], lr.shape[1] * scale, lr.shape[2] * scale)
+            try:
+                lr = np.load(lr_path)
+                hr = np.load(hr_path)
+            except (OSError, ValueError) as exc:
+                self.dropped_pairs.append((file_id, f"failed to load array: {exc}"))
+                continue
+            if lr.ndim != 3 or hr.ndim != 3:
+                self.dropped_pairs.append((file_id, f"LR and HR must have shape (C,H,W), got LR {lr.shape}, HR {hr.shape}"))
+                continue
+            if lr.shape[0] <= 0 or hr.shape[0] <= 0 or lr.shape[1] <= 0 or lr.shape[2] <= 0:
+                self.dropped_pairs.append((file_id, f"LR and HR must have positive dimensions, got LR {lr.shape}, HR {hr.shape}"))
+                continue
+            if lr.shape[0] != hr.shape[0]:
+                self.dropped_pairs.append((file_id, f"LR/HR channel count mismatch: {lr.shape[0]} vs {hr.shape[0]}"))
+                continue
+            if not np.isfinite(lr).all() or not np.isfinite(hr).all():
+                self.dropped_pairs.append((file_id, "LR and HR must contain only finite values"))
+                continue
+            expected_hr_shape = (lr.shape[0], lr.shape[1] * self.scale, lr.shape[2] * self.scale)
             if hr.shape != expected_hr_shape:
                 self.dropped_pairs.append(
                     (file_id, f"HR shape {hr.shape} != expected {expected_hr_shape} for scale={scale}")
