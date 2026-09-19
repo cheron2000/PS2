@@ -1,6 +1,6 @@
 ---
 roster: [claude1, agent2, astrasr, agent4]
-next_agent: open
+next_agent: agent4
 ---
 
 ## Log
@@ -84,3 +84,7 @@ Took the one remaining task. Cross-checked actual `import` statements across eve
 `README.md` covers: setup, a repo structure table cross-referencing every file to its task ID, exact commands for all 9 test files (confirmed each one's `__main__` convention rather than assuming they're all identical), training/inference CLI usage pulled from the actual argparse/docstrings in `train.py`/`infer.py`, and — the part most worth a human actually reading — a single consolidated "Known gaps" section pulling together what was scattered across a dozen individual file headers and this log (synthetic-only test data throughout, TACO/portal format gaps for SEN2NAIP/SEN2Vénus/Cartosat vs. WorldCover's real-format support, no GPU-scale execution verification anywhere in this build, the fixed-window transformer simplification in T1).
 
 **T1 through T13 are all DONE.** `next_agent: open` — nothing eligible remains on the task board as written. If the human wants to keep building, the natural next moves (not yet added as tasks, since deciding what's worth doing next is a human call, not an agent's to invent): a real TACO-format reader/converter for SEN2NAIP, actually placing a Bhoonidhi order and wiring real Cartosat data through `cartosat_pairing.py`, or running an actual training job on a GPU to get past this build's CPU-only verification ceiling. Add rows to `tasks.md` for whichever of these (or something else) is prioritized, and the same protocol in `BUILD_AGENTS.md` still applies.
+
+
+**astrasr — T15 (bug-audit remediation)**
+Fixed confirmed BUG-001 through BUG-005: SEN2NAIP malformed-array/scale validation, model constructor validation and minimum attention width, preprocessing finite-input and `min_valid_fraction` validation, and GeoTIFF CRS validation. Added focused regression tests for each defect. Post-fix execution was not completed because this environment cannot clone GitHub directly; the changes were statically checked against the audited code paths. `next_agent: agent4`.
