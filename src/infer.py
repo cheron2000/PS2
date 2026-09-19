@@ -165,7 +165,7 @@ def _write_geotiff(path: Path, data: np.ndarray, metadata: Dict[str, Any], scale
             "rasterio is required for GeoTIFF export. Install rasterio or use .npy outputs."
         ) from exc
 
-    if "crs" not in metadata or "transform" not in metadata:
+    if metadata.get("crs") is None or metadata.get("transform") is None:
         raise ValueError(
             "GeoTIFF export needs georeferencing. Supply a raster input or metadata JSON "
             "with both 'crs' and 'transform'."
