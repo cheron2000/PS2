@@ -103,8 +103,31 @@ def load_checkpoint(
     checkpoint: str | Path,
     device: torch.device,
 ) -> Tuple[SRModel, Dict[str, Any]]:
-    """Load a T9 checkpoint and reconstruct the saved model configuration."""
-    payload = torch.load(checkpoint, map_location=device)
+    """Load a T9 checkpoint and reconstruct the saved model configuration.
+
+    SECURITY (fix for audit finding #6, 2026-09-19): torch.load() with its
+    historical default (weights_only=False) uses pickle under the hood and
+    will execute arbitrary code embedded in a malicious checkpoint file --
+    a real remote-code-execution risk for any file loaded from outside your
+    own training run, not a hypothetical one. weights_only=True restricts
+    deserialization to tensors and a small set of safe builtin containers
+    (dict, OrderedDict, int, float, str, list), which is exactly what
+    train.py's save_checkpoint() produces -- so this is not just safer, it
+    matches what this codebase actually writes. If you hit an
+    UnpicklingError here on a checkpoint from OUTSIDE this codebase, that's
+    the check doing its job -- inspect the file before considering a
+    narrower, explicit allowlist rather than disabling this.
+    """
+    try:
+        payload = torch.load(checkpoint, map_location=device, weights_only=True)
+    except Exception as exc:
+        raise ValueError(
+            f"failed to load checkpoint safely (weights_only=True): {exc}. "
+            f"If this checkpoint is from a trusted source and uses types outside "
+            f"torch's safe-loading allowlist, inspect it before deciding whether "
+            f"to load it any other way -- do not silently fall back to "
+            f"weights_only=False."
+        ) from exc
     if isinstance(payload, dict) and "model_state" in payload:
         state = payload["model_state"]
         config = dict(payload.get("model_config") or {})
@@ -165,7 +188,7 @@ def _write_geotiff(path: Path, data: np.ndarray, metadata: Dict[str, Any], scale
             "rasterio is required for GeoTIFF export. Install rasterio or use .npy outputs."
         ) from exc
 
-    if metadata.get("crs") is None or metadata.get("transform") is None:
+    if "crs" not in metadata or "transform" not in metadata:
         raise ValueError(
             "GeoTIFF export needs georeferencing. Supply a raster input or metadata JSON "
             "with both 'crs' and 'transform'."
@@ -246,15 +269,28 @@ def main() -> None:
 
     if args.output_normalization == "same":
         output = mean
+        output_variance = variance
     elif args.output_normalization == "reflectance":
-        output = _denormalise_output(mean, {"method": "reflectance", "divisor": 10000.0})
+        # UNIT FIX (audit finding #5, 2026-09-19): mean was being denormalised
+        # by the reflectance divisor (x10000) while variance was written out
+        # completely unscaled -- inconsistent units between the two outputs.
+        # Var(a*X) = a^2 * Var(X), so if the mean is scaled by `divisor`, the
+        # variance must be scaled by `divisor**2` to describe the *same*
+        # rescaled quantity. Writing raw model-space variance next to
+        # reflectance-space mean made the uncertainty output silently wrong
+        # by a factor of 10000**2 = 1e8 whenever --output-normalization
+        # reflectance was used -- not a rounding error, a unit-system bug.
+        divisor = 10000.0
+        output = _denormalise_output(mean, {"method": "reflectance", "divisor": divisor})
+        output_variance = variance * (divisor ** 2)
     else:
         output = mean
+        output_variance = variance
 
     scale = int(config.get("scale", 4))
     write_output(args.output, output, metadata, scale)
     if args.uncertainty_output:
-        write_output(args.uncertainty_output, variance, metadata, scale)
+        write_output(args.uncertainty_output, output_variance, metadata, scale)
 
     print(
         f"inference complete: input={tuple(data.shape)}, output={tuple(output.shape)}, "
