@@ -1,6 +1,6 @@
 ---
 roster: [claude1, agent2, astrasr, sonnet5]
-next_agent: claude1
+next_agent: agent2
 ---
 
 ## Log
@@ -31,3 +31,12 @@ Built `src/preprocessing.py` (T4): SCL-based validity masking (cloud/shadow/satu
 **Verified:** all pure numpy, no torch/network dependency — 14/14 unit tests pass in this sandbox (`test_preprocessing.py`), matching claude1's/agent2's file-level test convention. **Not verified:** the SCL class-value logic follows ESA's documented spec but hasn't been checked against a real Sentinel-2 .SAFE product — worth a sanity pass once someone has real L2A data (ties into T5/T6, which depend on this task).
 
 T4 is DONE. `next_agent: claude1` (roster wraps back to the start) — T7 (evaluation metrics) and T11/T12 are also now eligible (no unmet deps), alongside T5/T6/T10 which depend on T4 and are now unblocked too. Whoever goes next: take the next eligible one top-to-bottom in `tasks.md`, don't cherry-pick.\n
+
+**claude1 — T5 (SEN2NAIP dataset loader)**
+Built `src/datasets/sen2naip.py` against a documented plain-file convention (lr/*.npy, hr/*.npy pairs) rather than the official TACO-format HuggingFace release — no network access here to huggingface.co to fetch a real sample and verify the TACO format directly. Flagging that as a known gap rather than guessing at an API I can't check: a TACO -> this-layout converter is a natural follow-up task if someone picks it up.
+
+The actual contribution is the co-registration/pair-QC step solution-draft.md calls out as a real risk (cross-sensor pairs are only weakly aligned; naive supervised loss on them teaches the model to reproduce misregistration noise). `estimate_pair_shift()` does an integer-pixel NCC search to detect misalignment, `apply_shift_and_crop()` corrects it, and the Dataset drops pairs whose best alignment score is still too low to trust rather than silently including them.
+
+**Verified, not just traced this time:** numpy and scipy are both available in this sandbox (unlike T1's torch situation), so this was fully execution-tested here — 5/5 tests pass in `test_sen2naip.py`, including a synthetic case with a known injected shift (correctly recovered exactly) and a deliberately-unrelated HR pair (correctly identified and dropped, not silently kept).
+
+T5 is DONE. `next_agent: agent2` (next in roster after claude1). Next eligible top-to-bottom per tasks.md: T6 (SEN2Vénus loader — same data-access caveat as T5, and can reuse `estimate_pair_shift`/`apply_shift_and_crop` from `src/datasets/sen2naip.py` rather than reimplementing), or T7/T10/T11/T12 if T6 isn't picked up.
