@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -155,16 +156,72 @@ def load_checkpoint(
     return model, config
 
 
-@torch.no_grad()
-def predict(model: SRModel, data_chw: np.ndarray, device: torch.device) -> Tuple[np.ndarray, np.ndarray]:
-    """Return mean and variance arrays in CHW format."""
+def validate_input_preflight(
+    data_chw: np.ndarray,
+    expected_channels: int,
+    max_pixels: int = 64_000_000,
+    max_bytes: int = 4_000_000_000,
+) -> None:
+    """T18 (external audit's T17, narrowed — see tasks.md): reject
+    malformed/oversized/non-finite input BEFORE any tensor is allocated,
+    not after. Called from predict() before torch.from_numpy()/model(...),
+    not as an afterthought once the array has already been converted and
+    (on GPU) copied to device memory.
+
+    Defaults: max_pixels=64M (~8000x8000, generous for a single Sentinel-2
+    tile crop -- a full untiled Sentinel-2 scene is roughly 11000x11000 per
+    10m band, so this is deliberately smaller than "a real full scene" to
+    force genuinely huge inputs through tiled inference (T21, not yet
+    built) rather than a single unbounded allocation) and max_bytes=4GB
+    (a rough guard against a technically-small-pixel-count but absurdly
+    high band-count array). Both are overridable per call site, not fixed
+    constants, since "reasonable" depends on available hardware.
+    """
     if data_chw.ndim != 3:
-        raise ValueError(f"expected CHW input, got {data_chw.shape}")
-    expected_channels = int(model.stem.in_channels)
-    if data_chw.shape[0] != expected_channels:
+        raise ValueError(f"expected CHW input, got array with {data_chw.ndim} dimensions, shape {data_chw.shape}")
+
+    channels, height, width = data_chw.shape
+    if channels != expected_channels:
+        raise ValueError(f"checkpoint expects {expected_channels} input bands, got {channels}")
+    if height <= 0 or width <= 0:
+        raise ValueError(f"input has non-positive spatial dimensions: {height}x{width}")
+
+    num_pixels = height * width
+    if num_pixels > max_pixels:
         raise ValueError(
-            f"checkpoint expects {expected_channels} input bands, got {data_chw.shape[0]}"
+            f"input is {height}x{width} ({num_pixels:,} pixels), exceeding max_pixels={max_pixels:,}. "
+            f"This is a preflight rejection specifically so a malicious or accidentally-huge input "
+            f"can't force an unbounded allocation -- tile the input (T21, not yet implemented) or "
+            f"raise max_pixels explicitly if you know the hardware can handle it."
         )
+
+    if data_chw.nbytes > max_bytes:
+        raise ValueError(
+            f"input is {data_chw.nbytes:,} bytes, exceeding max_bytes={max_bytes:,} "
+            f"(shape {data_chw.shape}, dtype {data_chw.dtype})"
+        )
+
+    if not np.isfinite(data_chw).all():
+        raise ValueError(
+            "input contains non-finite values (NaN/Inf). Rejected before model allocation -- "
+            "a NaN/Inf silently propagates through every downstream layer rather than failing loudly."
+        )
+
+
+@torch.no_grad()
+def predict(
+    model: SRModel,
+    data_chw: np.ndarray,
+    device: torch.device,
+    max_pixels: int = 64_000_000,
+    max_bytes: int = 4_000_000_000,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return mean and variance arrays in CHW format."""
+    expected_channels = int(model.stem.in_channels)
+    # Preflight BEFORE allocation -- this replaces the narrower ndim/channel-only
+    # checks the previous version had here, since validate_input_preflight()
+    # covers those plus size and finiteness, all before torch.from_numpy().
+    validate_input_preflight(data_chw, expected_channels, max_pixels=max_pixels, max_bytes=max_bytes)
     tensor = torch.from_numpy(np.ascontiguousarray(data_chw)).unsqueeze(0).to(device=device, dtype=torch.float32)
     mean, log_var = model(tensor)
     # Clamp only for conversion to variance. This prevents a pathological checkpoint
@@ -174,8 +231,21 @@ def predict(model: SRModel, data_chw: np.ndarray, device: torch.device) -> Tuple
 
 
 def _write_npy(path: Path, data: np.ndarray) -> None:
+    """Atomic write (T18): write to a temp file in the same directory, then
+    os.replace() to the final path. os.replace() is atomic on POSIX and
+    Windows when source/destination are on the same filesystem, which same-
+    directory guarantees -- so a crash or kill mid-write can never leave a
+    truncated/corrupt file sitting at the real output path; worst case, an
+    orphaned .tmp file is left, and the destination path either has the
+    complete previous version or doesn't exist yet."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.save(path, data.astype(np.float32, copy=False))
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    np.save(tmp_path, data.astype(np.float32, copy=False))
+    # np.save appends .npy to the filename if it's not already the suffix,
+    # so tmp_path becomes e.g. "out.npy.tmp.npy" on disk -- reconcile that
+    # explicitly rather than relying on np.save's suffix-guessing behavior.
+    actual_tmp_path = tmp_path if tmp_path.suffix == ".npy" else tmp_path.with_suffix(tmp_path.suffix + ".npy")
+    os.replace(actual_tmp_path, path)
 
 
 def _write_geotiff(path: Path, data: np.ndarray, metadata: Dict[str, Any], scale: int) -> None:
@@ -221,8 +291,10 @@ def _write_geotiff(path: Path, data: np.ndarray, metadata: Dict[str, Any], scale
     if metadata.get("nodata") is not None:
         profile["nodata"] = metadata["nodata"]
     path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(path, "w", **profile) as dst:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with rasterio.open(tmp_path, "w", **profile) as dst:
         dst.write(data.astype(np.float32, copy=False))
+    os.replace(tmp_path, path)  # atomic on the same filesystem, see _write_npy's comment
 
 
 def write_output(
@@ -267,6 +339,18 @@ def main() -> None:
         "--device",
         default="cuda" if torch.cuda.is_available() else "cpu",
     )
+    parser.add_argument(
+        "--max-pixels",
+        type=int,
+        default=64_000_000,
+        help="T18: reject input larger than this before allocation (default ~8000x8000)",
+    )
+    parser.add_argument(
+        "--max-bytes",
+        type=int,
+        default=4_000_000_000,
+        help="T18: reject input using more raw memory than this before allocation",
+    )
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -275,7 +359,7 @@ def main() -> None:
     data, metadata = _load_input(args.input, metadata)
 
     data, input_stats = _normalise_input(data, args.input_normalization)
-    mean, variance = predict(model, data, device)
+    mean, variance = predict(model, data, device, max_pixels=args.max_pixels, max_bytes=args.max_bytes)
 
     if args.output_normalization == "same":
         output = mean

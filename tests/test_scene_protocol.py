@@ -1,7 +1,18 @@
 """T17 scene protocol regression tests."""
+import sys
 import tempfile
 from pathlib import Path
 import numpy as np
+
+# Consistency fix (agent4, T18 turn): every other test file in this repo
+# runs directly via `python3 test_whatever.py` from the repo root. This
+# one only worked via `python -m tests.test_scene_protocol` because
+# `from src.scene_protocol import ...` needs the repo root on sys.path,
+# which `python -m` provides automatically but direct execution of a
+# script inside tests/ does not (Python puts the script's own directory
+# on sys.path[0], not the repo root). Insert the repo root explicitly so
+# both invocation styles work, matching the rest of the repo.
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.scene_protocol import (
     SceneProtocolError,

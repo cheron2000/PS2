@@ -27,7 +27,7 @@ from rasterio.crs import CRS
 import rasterio
 
 from src.model import SRModel
-from src.infer import load_checkpoint, predict, write_output, _load_input, smoke_test
+from src.infer import load_checkpoint, predict, write_output, _load_input, smoke_test, validate_input_preflight
 
 
 def _make_checkpoint(path, **model_kwargs):
@@ -161,6 +161,103 @@ def test_geotiff_export_rejects_missing_crs():
             assert "georeferencing" in str(exc)
         else:
             raise AssertionError("GeoTIFF export should reject a None CRS")
+
+def test_preflight_rejects_wrong_ndim():
+    try:
+        validate_input_preflight(np.zeros((16, 16)), expected_channels=4)
+        assert False, "should reject non-3D input"
+    except ValueError as e:
+        assert "dimensions" in str(e)
+
+
+def test_preflight_rejects_wrong_channel_count():
+    try:
+        validate_input_preflight(np.zeros((3, 16, 16)), expected_channels=4)
+        assert False, "should reject wrong channel count"
+    except ValueError as e:
+        assert "4 input bands" in str(e)
+
+
+def test_preflight_rejects_oversized_input():
+    # 10000x10000 with default max_pixels=64M (8000x8000-ish) should reject
+    huge = np.zeros((1, 1, 1), dtype=np.float32)
+    huge_shape_check = np.lib.stride_tricks.as_strided(
+        huge, shape=(4, 10000, 10000), strides=(0, 0, 0)
+    )  # a real (4,10000,10000)-shaped view without allocating 4*10000*10000*4 bytes —
+       # exactly the point: prove rejection happens before real allocation would occur
+    try:
+        validate_input_preflight(huge_shape_check, expected_channels=4, max_pixels=64_000_000)
+        assert False, "should reject oversized input"
+    except ValueError as e:
+        assert "exceeding max_pixels" in str(e)
+
+
+def test_preflight_accepts_input_within_limits():
+    data = np.random.default_rng(0).random((4, 64, 64)).astype(np.float32)
+    validate_input_preflight(data, expected_channels=4)  # should not raise
+
+
+def test_preflight_rejects_nan():
+    data = np.zeros((4, 8, 8), dtype=np.float32)
+    data[0, 0, 0] = np.nan
+    try:
+        validate_input_preflight(data, expected_channels=4)
+        assert False, "should reject NaN"
+    except ValueError as e:
+        assert "non-finite" in str(e)
+
+
+def test_preflight_rejects_inf():
+    data = np.zeros((4, 8, 8), dtype=np.float32)
+    data[0, 0, 0] = np.inf
+    try:
+        validate_input_preflight(data, expected_channels=4)
+        assert False, "should reject Inf"
+    except ValueError as e:
+        assert "non-finite" in str(e)
+
+
+def test_preflight_runs_before_predict_allocates():
+    """The actual point of T18: predict() must reject bad input via
+    validate_input_preflight() BEFORE calling the model, not after a
+    failed/wasteful forward pass."""
+    model = SRModel(in_channels=4, out_channels=4, base_channels=8,
+                     num_attn_blocks=1, window_size=4, num_heads=2, scale=2)
+    data = np.zeros((4, 8, 8), dtype=np.float32)
+    data[0, 0, 0] = np.nan
+    try:
+        predict(model, data, torch.device("cpu"))
+        assert False, "predict() should reject non-finite input via preflight"
+    except ValueError as e:
+        assert "non-finite" in str(e)
+
+
+def test_npy_write_is_atomic_no_leftover_tmp_on_success():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "out.npy")
+        data = np.random.default_rng(0).random((4, 8, 8)).astype(np.float32)
+        write_output(path, data, {}, scale=1)
+
+        assert os.path.exists(path)
+        assert np.array_equal(np.load(path), data)
+        leftover_tmp_files = [f for f in os.listdir(tmpdir) if ".tmp" in f]
+        assert not leftover_tmp_files, f"atomic write left a temp file behind: {leftover_tmp_files}"
+
+
+def test_geotiff_write_is_atomic_no_leftover_tmp_on_success():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "out.tif")
+        data = np.random.default_rng(0).random((4, 8, 8)).astype(np.float32)
+        metadata = {
+            "crs": CRS.from_epsg(32643),
+            "transform": tuple(Affine.translation(0, 0) * Affine.scale(10, -10)),
+        }
+        write_output(path, data, metadata, scale=1)
+
+        assert os.path.exists(path)
+        leftover_tmp_files = [f for f in os.listdir(tmpdir) if ".tmp" in f]
+        assert not leftover_tmp_files, f"atomic write left a temp file behind: {leftover_tmp_files}"
+
 
 def main():
     tests = [obj for name, obj in list(globals().items()) if name.startswith("test_")]
