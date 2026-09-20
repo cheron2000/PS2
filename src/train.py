@@ -14,7 +14,9 @@ Example:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import random
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
@@ -26,6 +28,22 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from src.losses import SRLoss
 from src.model import SRModel
 from src.datasets.sen2naip import SEN2NAIPDataset
+
+
+def _rng_state() -> Dict:
+    state = {"python": random.getstate(), "numpy": np.random.get_state(), "torch": torch.get_rng_state().tolist()}
+    if torch.cuda.is_available():
+        state["cuda"] = [x.tolist() for x in torch.cuda.get_rng_state_all()]
+    return state
+
+
+def _restore_rng_state(state: Dict) -> None:
+    random.setstate(tuple(state["python"]))
+    n = state["numpy"]
+    np.random.set_state((n[0], np.asarray(n[1], dtype=np.uint32), n[2], n[3], n[4]))
+    torch.set_rng_state(torch.tensor(state["torch"], dtype=torch.uint8))
+    if torch.cuda.is_available() and "cuda" in state:
+        torch.cuda.set_rng_state_all([torch.tensor(x, dtype=torch.uint8) for x in state["cuda"]])
 
 
 def set_seed(seed: int) -> None:
@@ -105,19 +123,24 @@ def save_checkpoint(
     epoch: int,
     metrics: Dict[str, float],
     model_config: Optional[Dict] = None,
+    run_config: Optional[Dict] = None,
+    dataset_fingerprint: Optional[str] = None,
 ) -> None:
     """Save a self-contained checkpoint suitable for later inference/resume."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
+    payload = {
             "epoch": epoch,
             "model_state": model.state_dict(),
             "optimizer_state": optimizer.state_dict(),
             "metrics": metrics,
             "model_config": model_config or {},
-        },
-        path,
-    )
+            "run_config": run_config or {},
+            "dataset_fingerprint": dataset_fingerprint,
+            "rng_state": _rng_state(),
+        }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save(payload, tmp)
+    os.replace(tmp, path)
 
 
 def fit(
@@ -129,7 +152,10 @@ def fit(
     device: torch.device,
     val_loader: Optional[Iterable[Dict]] = None,
     checkpoint_dir: Optional[str | Path] = None,
+    start_epoch: int = 1,
     model_config: Optional[Dict] = None,
+    run_config: Optional[Dict] = None,
+    dataset_fingerprint: Optional[str] = None,
 ) -> list[Dict[str, float]]:
     """Train, optionally validate, checkpoint latest/best, and return history."""
     if epochs < 1:
@@ -139,7 +165,7 @@ def fit(
     history = []
     best_val = float("inf")
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, start_epoch + epochs):
         train_loss, train_parts = run_epoch(
             model, train_loader, criterion, device, optimizer=optimizer
         )
@@ -165,12 +191,12 @@ def fit(
         history.append(record)
         if checkpoint_path:
             save_checkpoint(
-                checkpoint_path / "last.pt", model, optimizer, epoch, record, model_config
+                checkpoint_path / "last.pt", model, optimizer, epoch, record, model_config, run_config, dataset_fingerprint
             )
             if score <= best_val:
                 best_val = score
                 save_checkpoint(
-                    checkpoint_path / "best.pt", model, optimizer, epoch, record, model_config
+                    checkpoint_path / "best.pt", model, optimizer, epoch, record, model_config, run_config, dataset_fingerprint
                 )
             with (checkpoint_path / "history.json").open("w", encoding="utf-8") as handle:
                 json.dump(history, handle, indent=2)
@@ -220,6 +246,43 @@ def split_dataset(dataset: Dataset, val_fraction: float, seed: int):
     return random_split(dataset, [n_train, n_val], generator=generator)
 
 
+
+def dataset_fingerprint(dataset: Dataset) -> str:
+    """Hash dataset identity/provenance without hashing image pixels."""
+    values = []
+    for attr in ("pairs", "samples", "records"):
+        value = getattr(dataset, attr, None)
+        if value is not None:
+            values.append(repr(value))
+    if not values:
+        values.append(f"{type(dataset).__module__}.{type(dataset).__qualname__}:{len(dataset)}")
+    return hashlib.sha256("\n".join(values).encode("utf-8")).hexdigest()
+
+
+def write_run_manifest(path: Path, config: Dict, fingerprint: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"schema_version": 1, "config": config, "dataset_fingerprint": fingerprint}
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True, default=str)
+        handle.write("\n")
+    os.replace(tmp, path)
+
+
+def resume_from_checkpoint(path: str | Path, model: torch.nn.Module,
+                           optimizer: torch.optim.Optimizer,
+                           *, expected_fingerprint: str | None = None) -> int:
+    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+    if "model_state" not in checkpoint or "optimizer_state" not in checkpoint:
+        raise ValueError("resume checkpoint lacks model_state or optimizer_state")
+    if expected_fingerprint is not None and checkpoint.get("dataset_fingerprint") != expected_fingerprint:
+        raise ValueError("checkpoint dataset fingerprint does not match current dataset")
+    model.load_state_dict(checkpoint["model_state"])
+    optimizer.load_state_dict(checkpoint["optimizer_state"])
+    if "rng_state" in checkpoint:
+        _restore_rng_state(checkpoint["rng_state"])
+    return int(checkpoint.get("epoch", 0)) + 1
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", required=True)
@@ -234,6 +297,7 @@ def main() -> None:
              "selection (default 0.2). Pass 0 to disable and fall back to "
              "training-loss-based selection explicitly, rather than by omission.",
     )
+    parser.add_argument("--resume", default=None, help="checkpoint to resume from")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -243,9 +307,17 @@ def main() -> None:
     if len(dataset) == 0:
         raise ValueError("dataset contains no trusted pairs after alignment/QC")
     model_config = {"in_channels": 4, "out_channels": 4, "scale": dataset.scale}
+    fingerprint = dataset_fingerprint(dataset)
+    run_config = vars(args).copy()
+    run_config["model_config"] = model_config
+    write_run_manifest(Path(args.checkpoint_dir) / "run_manifest.json", run_config, fingerprint)
     model = SRModel(**model_config)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     criterion = SRLoss()
+    start_epoch = 1
+    if args.resume:
+        start_epoch = resume_from_checkpoint(args.resume, model, optimizer, expected_fingerprint=fingerprint)
+        print(f"resuming from {args.resume}: next epoch={start_epoch}")
 
     if args.val_fraction > 0:
         train_subset, val_subset = split_dataset(dataset, args.val_fraction, args.seed)
@@ -268,7 +340,10 @@ def main() -> None:
         device,
         val_loader=val_loader,
         checkpoint_dir=args.checkpoint_dir,
+        start_epoch=start_epoch,
         model_config=model_config,
+        run_config=run_config,
+        dataset_fingerprint=fingerprint,
     )
 
 
