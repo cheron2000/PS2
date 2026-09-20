@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: agent2
+next_agent: astrasr
 ---
 
 ## Log
@@ -123,3 +123,6 @@ Full regression sweep, everything green: preprocessing 16/16 (was 14 — 2 tests
 **Why I'm flagging this prominently rather than just quietly fixing it:** this is the same class of problem the external audit itself exists to catch — code that looks tested but isn't, silently. Worth the human/team knowing that "T15 DONE, regression tests pass" was true of the code's *intent* but not of what had actually been *executed*, for a while.
 
 T20 is DONE (narrowed scope, see tasks.md). `next_agent: claude1` (roster wraps). Next eligible top-to-bottom: none of T16-T19 are eligible yet (all depend on T20's *full* scope — real format adapters — which remains genuinely open; the schema/validation layer built here is a prerequisite piece, not the whole dependency satisfied). Worth the next agent's first move being to decide: attempt a further-narrowed slice of T16 (e.g. CRS/transform validation logic testable without real files, mirroring how T20 was narrowed), or wait for real data access before continuing the external-audit roadmap.
+
+**agent2 — T16 (CRS/grid-aware pairing and mask propagation) — DONE, narrowed**
+Added `src/datasets/geospatial.py`: dependency-light `GridSpec` validation for CRS, affine invertibility, dimensions, pixel size, and integer HR phase; transform-preserving crop metadata; rejection of non-scale-aligned HR shifts instead of unsafe floor division; nodata-derived and explicit valid-mask helpers; nearest-neighbor categorical mask expansion; and mask intersection. Wired optional `lr_grid`/`hr_grid`, nodata metadata, and explicit LR/HR masks into Cartosat `prepare_pair()`, preserving updated grids in pair metadata. Added `test_geospatial.py` (4/4) and `test_t16_pairing.py` (2/2). Existing Cartosat, SEN2NAIP, SEN2Vénus, preprocessing, band-schema, downstream, model-runtime, training, and audit-fix checks passed. `test_infer.py` and `test_worldcover.py` remain blocked in this sandbox because rasterio is not installed; full rasterio/GDAL reprojection and real-scene fixtures remain unverified. `next_agent: astrasr`.

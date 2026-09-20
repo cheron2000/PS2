@@ -41,6 +41,14 @@ from src.datasets.sen2naip import (
     estimate_pair_shift,
     upsample_nearest,
 )
+from src.datasets.geospatial import (
+    GridContractError,
+    GridSpec,
+    combine_valid_masks,
+    crop_pair_with_grids,
+    mask_from_nodata,
+    propagate_valid_mask,
+)
 
 SCALE_FACTOR = 4
 
@@ -149,8 +157,17 @@ def prepare_pair(
     min_ncc_score: float = 0.1,
     clip_range: tuple[float, float] = (0.0, 1.0),
     metadata: Optional[Mapping[str, Any]] = None,
+    lr_valid_mask: Optional[np.ndarray] = None,
+    hr_valid_mask: Optional[np.ndarray] = None,
 ) -> CartosatPair:
-    """Align and harmonize one pre-extracted Sentinel-2/Cartosat pair."""
+    """Align and harmonize one pair, optionally enforcing a CRS/grid contract.
+
+    If metadata contains ``lr_grid`` and ``hr_grid`` objects, both are parsed as
+    :class:`GridSpec` and shape-only pairing is rejected unless CRS, pixel size,
+    affine phase, and the registration shift are all representable on the LR
+    grid. Optional masks (or ``lr_nodata``/``hr_nodata`` metadata) are cropped
+    with the data and intersected into the returned HR-resolution validity mask.
+    """
     lr = _validate_chw(lr, "lr")
     cartosat = _validate_chw(cartosat, "cartosat")
     if scale < 1 or int(scale) != scale:
@@ -160,18 +177,51 @@ def prepare_pair(
     if cartosat.shape != expected:
         raise PairRejected(f"Cartosat shape {cartosat.shape} != expected {expected}")
 
+    record = dict(metadata or {})
+    lr_grid = hr_grid = None
+    if "lr_grid" in record or "hr_grid" in record:
+        if "lr_grid" not in record or "hr_grid" not in record:
+            raise PairRejected("both lr_grid and hr_grid metadata are required for CRS-aware pairing")
+        try:
+            lr_grid = GridSpec.from_mapping(record["lr_grid"], name="lr_grid")
+            hr_grid = GridSpec.from_mapping(record["hr_grid"], name="hr_grid")
+        except GridContractError as exc:
+            raise PairRejected(str(exc)) from exc
+        if (lr_grid.height, lr_grid.width) != lr.shape[1:] or (hr_grid.height, hr_grid.width) != cartosat.shape[1:]:
+            raise PairRejected("grid dimensions do not match the supplied arrays")
+
     dy, dx, score = estimate_pair_shift(lr, cartosat, scale=scale, max_shift=max_shift)
     if score < min_ncc_score:
         raise PairRejected(f"NCC score {score:.3f} below threshold {min_ncc_score}")
-    lr_aligned, hr_aligned = apply_shift_and_crop(lr, cartosat, dy, dx, scale=scale)
+    try:
+        if lr_grid is not None:
+            lr_aligned, hr_aligned, lr_grid_out, hr_grid_out = crop_pair_with_grids(
+                lr, cartosat, dy, dx, scale, lr_grid, hr_grid
+            )
+        else:
+            lr_aligned, hr_aligned = apply_shift_and_crop(lr, cartosat, dy, dx, scale=scale)
+            lr_grid_out = hr_grid_out = None
+    except GridContractError as exc:
+        raise PairRejected(str(exc)) from exc
+
+    lr_mask = mask_from_nodata(lr, record.get("lr_nodata")) if lr_valid_mask is None else propagate_valid_mask(lr_valid_mask, expected_shape=lr.shape[1:], name="lr_valid_mask")
+    hr_mask = mask_from_nodata(cartosat, record.get("hr_nodata")) if hr_valid_mask is None else propagate_valid_mask(hr_valid_mask, expected_shape=cartosat.shape[1:], name="hr_valid_mask")
+    if lr_grid is not None:
+        lr_mask, hr_mask, _, _ = crop_pair_with_grids(
+            lr_mask[None].astype(np.float32), hr_mask[None].astype(np.float32), dy, dx, scale, lr_grid, hr_grid
+        )
+        lr_mask, hr_mask = lr_mask[0].astype(bool), hr_mask[0].astype(bool)
+    else:
+        lr_mask, hr_mask = apply_shift_and_crop(lr_mask[None].astype(np.float32), hr_mask[None].astype(np.float32), dy, dx, scale=scale)
+        lr_mask, hr_mask = lr_mask[0].astype(bool), hr_mask[0].astype(bool)
     hr_harmonized, gains, offsets = _harmonize_with_scale(
         lr_aligned, hr_aligned, scale, clip_range, min_std=1e-6
     )
-    lr_valid = np.isfinite(lr_aligned).all(axis=0)
-    lr_valid_hr = np.repeat(np.repeat(lr_valid, scale, axis=0), scale, axis=1)
-    hr_valid = np.isfinite(hr_harmonized).all(axis=0)
-    valid_mask = lr_valid_hr & hr_valid
-    record = dict(metadata or {})
+    lr_valid_hr = np.repeat(np.repeat(lr_mask, scale, axis=0), scale, axis=1)
+    valid_mask = combine_valid_masks(lr_valid_hr, hr_mask, np.isfinite(hr_harmonized).all(axis=0))
+    if lr_grid_out is not None:
+        record["lr_grid"] = lr_grid_out.to_dict()
+        record["hr_grid"] = hr_grid_out.to_dict()
     record.update({"scale": scale, "source": "Cartosat", "reference_gsd_m": 10.0 / scale})
     return CartosatPair(
         lr=lr_aligned.astype(np.float32),
