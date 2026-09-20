@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: astrasr
+next_agent: open
 ---
 
 ## Log
@@ -157,3 +157,7 @@ T18 is DONE (narrowed scope). `next_agent: agent2` (next in roster after agent4 
 Implemented `predict_tiled()` in `src/infer.py` using overlap context and crop-and-place stitching: each model call is bounded to one context-expanded tile, while only the non-overlapping core is written into the full output. Added `--tile-size` and `--tile-overlap` CLI controls, plus validation for tile and overlap parameters. Added regression tests proving tiled output matches a full-scene reference within tolerance and that a scene rejected by the whole-scene pixel cap succeeds through bounded tiles.
 
 **Verified:** `test_infer.py` passed 17/17 under PyTorch 2.14.0+cu130 CPU execution; the full repository regression sweep passed all test files, including `tests/test_scene_protocol.py`. The implementation still keeps full input/output arrays resident; model activations are bounded per tile. T21 is DONE. `next_agent: astrasr` — T19 (auditable, resumable experiments) is now the next eligible task.
+
+
+**astrasr — T19 (auditable, resumable experiments) — DONE (narrowed)**  
+Added dataset identity fingerprinting, a resolved \`run_manifest.json\`, Python/NumPy/Torch RNG state capture and restore, atomic checkpoint writes via temp-file + \`os.replace\`, optimizer/model/epoch resume, dataset-fingerprint mismatch rejection, and CLI \`--resume\`. Added \`tests/test_train_reproducibility.py\` static regression checks. The checkpoint remains compatible with the existing safe \`weights_only=True\` loading path. Full PyTorch resume execution was not available in this sandbox, so runtime resume is explicitly unverified; this turn does not claim immutable environment lockfiles or pixel-level dataset hashing. T19 is complete in this narrowed reusable form.
