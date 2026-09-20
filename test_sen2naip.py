@@ -122,7 +122,22 @@ def test_dataset_end_to_end_with_synthetic_files():
     finally:
         shutil.rmtree(tmpdir)
 
-def test_dataset_rejects_invalid_scale():\n    tmpdir = tempfile.mkdtemp()\n    try:\n        os.makedirs(os.path.join(tmpdir, "lr"))\n        os.makedirs(os.path.join(tmpdir, "hr"))\n        np.save(os.path.join(tmpdir, "lr", "x.npy"), np.ones((4, 4, 4)))\n        np.save(os.path.join(tmpdir, "hr", "x.npy"), np.ones((4, 16, 16)))\n        for scale in (0, -1, 1.5, True):\n            try:\n                SEN2NAIPDataset(tmpdir, scale=scale)\n            except ValueError:\n                pass\n            else:\n                raise AssertionError(f"scale {scale!r} should be rejected")\n    finally:\n        shutil.rmtree(tmpdir)\n\n
+def test_dataset_rejects_invalid_scale():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmpdir, "lr"))
+        os.makedirs(os.path.join(tmpdir, "hr"))
+        np.save(os.path.join(tmpdir, "lr", "x.npy"), np.ones((4, 4, 4)))
+        np.save(os.path.join(tmpdir, "hr", "x.npy"), np.ones((4, 16, 16)))
+        for scale in (0, -1, 1.5, True):
+            try:
+                SEN2NAIPDataset(tmpdir, scale=scale)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"scale {scale!r} should be rejected")
+    finally:
+        shutil.rmtree(tmpdir)
 
 def test_dataset_rejects_malformed_lr_shape():
     tmpdir = tempfile.mkdtemp()
@@ -144,4 +159,6 @@ if __name__ == "__main__":
     test_estimate_pair_shift_recovers_known_shift()
     test_apply_shift_and_crop_shapes_consistent()
     test_dataset_end_to_end_with_synthetic_files()
+    test_dataset_rejects_invalid_scale()
+    test_dataset_rejects_malformed_lr_shape()
     print(f"\nAll tests passed. (torch available in this run: {_HAS_TORCH})")

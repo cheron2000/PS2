@@ -55,6 +55,7 @@ except Exception:
     _DatasetBase = object  # dataset still usable (returns numpy) without torch
 
 from src.preprocessing import normalize_bands
+from src.datasets.band_schema import validate_bands, SENTINEL2_L2A_4BAND, NAIP_4BAND, BandSchemaError
 
 SCALE_FACTOR = 4  # 10m Sentinel-2 -> 2.5m NAIP, SEN2NAIP's real cross-sensor task
 
@@ -201,6 +202,18 @@ class SEN2NAIPDataset(_DatasetBase):
                 continue
             if not np.isfinite(lr).all() or not np.isfinite(hr).all():
                 self.dropped_pairs.append((file_id, "LR and HR must contain only finite values"))
+                continue
+            # T20: band schema validation — catches the audit's named
+            # concern (a repeated/truncated channel from a band-order bug)
+            # before it silently trains a model on malformed input. Uses
+            # allow_extra_bands so a 4-band pair validates against the
+            # project's standard R/G/B/NIR schema without requiring an
+            # exact 4-band count elsewhere in the pipeline to change.
+            try:
+                validate_bands(lr, SENTINEL2_L2A_4BAND)
+                validate_bands(hr, NAIP_4BAND)
+            except BandSchemaError as exc:
+                self.dropped_pairs.append((file_id, f"band schema validation failed: {exc}"))
                 continue
             expected_hr_shape = (lr.shape[0], lr.shape[1] * self.scale, lr.shape[2] * self.scale)
             if hr.shape != expected_hr_shape:

@@ -188,7 +188,17 @@ def _write_geotiff(path: Path, data: np.ndarray, metadata: Dict[str, Any], scale
             "rasterio is required for GeoTIFF export. Install rasterio or use .npy outputs."
         ) from exc
 
-    if "crs" not in metadata or "transform" not in metadata:
+    # BUG-005 fix (astrasr, audit remediation) checked key *presence*, not
+    # whether the value was actually usable — metadata.get("crs") is None
+    # is a real, easy-to-hit case (e.g. an input raster with no CRS set,
+    # or a hand-built metadata dict), and it slipped straight through the
+    # old `"crs" not in metadata` check since the key existed with value
+    # None. Caught by agent4 via test_infer.py's
+    # test_geotiff_export_rejects_missing_crs, which astrasr's own
+    # remediation turn added but which never actually ran due to a
+    # separate file-corruption bug (see build-status.md) — so this was
+    # never execution-verified until now.
+    if metadata.get("crs") is None or metadata.get("transform") is None:
         raise ValueError(
             "GeoTIFF export needs georeferencing. Supply a raster input or metadata JSON "
             "with both 'crs' and 'transform'."

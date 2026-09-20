@@ -129,7 +129,15 @@ def test_tile_rejects_bad_dims():
     except ValueError:
         pass
 
-def test_tile_rejects_invalid_min_valid_fraction():\n    data = np.zeros((1, 4, 4))\n    for threshold in (-0.1, 1.1, np.nan, np.inf):\n        try:\n            tile_into_patches(data, 2, min_valid_fraction=threshold)\n        except ValueError:\n            pass\n        else:\n            raise AssertionError(f"threshold {threshold!r} should be rejected")\n\n
+def test_tile_rejects_invalid_min_valid_fraction():
+    data = np.zeros((1, 4, 4))
+    for threshold in (-0.1, 1.1, np.nan, np.inf):
+        try:
+            tile_into_patches(data, 2, min_valid_fraction=threshold)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"threshold {threshold!r} should be rejected")
 
 def main():
     tests = [obj for name, obj in list(globals().items()) if name.startswith("test_")]
