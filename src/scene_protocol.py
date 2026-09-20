@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -248,7 +249,7 @@ def _normal_quantile(p: float) -> float:
     lo, hi = -9.0, 9.0
     for _ in range(80):
         mid = (lo + hi) / 2.0
-        cdf = 0.5 * (1.0 + np.math.erf(mid / np.sqrt(2.0)))
+        cdf = 0.5 * (1.0 + math.erf(mid / np.sqrt(2.0)))
         if cdf < p:
             lo = mid
         else:
