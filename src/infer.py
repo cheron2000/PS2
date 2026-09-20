@@ -159,8 +159,8 @@ def load_checkpoint(
 def validate_input_preflight(
     data_chw: np.ndarray,
     expected_channels: int,
-    max_pixels: int = 64_000_000,
-    max_bytes: int = 4_000_000_000,
+    max_pixels: Optional[int] = 64_000_000,
+    max_bytes: Optional[int] = 4_000_000_000,
 ) -> None:
     """T18 (external audit's T17, narrowed — see tasks.md): reject
     malformed/oversized/non-finite input BEFORE any tensor is allocated,
@@ -171,8 +171,8 @@ def validate_input_preflight(
     Defaults: max_pixels=64M (~8000x8000, generous for a single Sentinel-2
     tile crop -- a full untiled Sentinel-2 scene is roughly 11000x11000 per
     10m band, so this is deliberately smaller than "a real full scene" to
-    force genuinely huge inputs through tiled inference (T21, not yet
-    built) rather than a single unbounded allocation) and max_bytes=4GB
+    force genuinely huge inputs through tiled inference rather than a single
+    unbounded allocation) and max_bytes=4GB
     (a rough guard against a technically-small-pixel-count but absurdly
     high band-count array). Both are overridable per call site, not fixed
     constants, since "reasonable" depends on available hardware.
@@ -187,15 +187,15 @@ def validate_input_preflight(
         raise ValueError(f"input has non-positive spatial dimensions: {height}x{width}")
 
     num_pixels = height * width
-    if num_pixels > max_pixels:
+    if max_pixels is not None and num_pixels > max_pixels:
         raise ValueError(
             f"input is {height}x{width} ({num_pixels:,} pixels), exceeding max_pixels={max_pixels:,}. "
             f"This is a preflight rejection specifically so a malicious or accidentally-huge input "
-            f"can't force an unbounded allocation -- tile the input (T21, not yet implemented) or "
+            f"can't force an unbounded allocation -- tile the input or "
             f"raise max_pixels explicitly if you know the hardware can handle it."
         )
 
-    if data_chw.nbytes > max_bytes:
+    if max_bytes is not None and data_chw.nbytes > max_bytes:
         raise ValueError(
             f"input is {data_chw.nbytes:,} bytes, exceeding max_bytes={max_bytes:,} "
             f"(shape {data_chw.shape}, dtype {data_chw.dtype})"
@@ -213,8 +213,8 @@ def predict(
     model: SRModel,
     data_chw: np.ndarray,
     device: torch.device,
-    max_pixels: int = 64_000_000,
-    max_bytes: int = 4_000_000_000,
+    max_pixels: Optional[int] = 64_000_000,
+    max_bytes: Optional[int] = 4_000_000_000,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Return mean and variance arrays in CHW format."""
     expected_channels = int(model.stem.in_channels)
@@ -228,6 +228,100 @@ def predict(
     # from producing inf while retaining the trained log-variance tensor otherwise.
     variance = torch.exp(log_var.clamp(min=-20.0, max=10.0))
     return mean.squeeze(0).cpu().numpy(), variance.squeeze(0).cpu().numpy()
+
+
+def _tile_starts(length: int, core_size: int) -> list[int]:
+    """Return core-window starts that cover an axis without a tiny tail tile."""
+    if length <= 0 or core_size <= 0:
+        raise ValueError("length and core_size must be positive")
+    last_start = max(0, length - core_size)
+    starts = list(range(0, last_start + 1, core_size))
+    if starts[-1] != last_start:
+        starts.append(last_start)
+    return starts
+
+
+@torch.no_grad()
+def predict_tiled(
+    model: SRModel,
+    data_chw: np.ndarray,
+    device: torch.device,
+    tile_size: int = 1024,
+    overlap: int = 64,
+    max_pixels: Optional[int] = 64_000_000,
+    max_bytes: Optional[int] = 4_000_000_000,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Run bounded overlapping inference and stitch non-overlapping core tiles.
+
+    ``tile_size`` is the size of each core region in input pixels. ``overlap``
+    adds context on every side before the model forward pass; only the core is
+    copied into the output. Crop-and-place avoids seams caused by averaging
+    predictions made with different amounts of context, while the context
+    reduces boundary effects for convolutional and windowed-attention layers.
+    The full input and output arrays remain in memory, but model activations
+    are bounded by one context-expanded tile.
+    """
+    if tile_size <= 0:
+        raise ValueError(f"tile_size must be positive, got {tile_size}")
+    if overlap < 0 or overlap >= tile_size:
+        raise ValueError(f"overlap must satisfy 0 <= overlap < tile_size, got {overlap}")
+
+    expected_channels = int(model.stem.in_channels)
+    # Large scenes are intentionally exempt from whole-scene pixel/byte caps;
+    # each context-expanded tile is still checked by predict() below.
+    validate_input_preflight(
+        data_chw,
+        expected_channels,
+        max_pixels=None,
+        max_bytes=None,
+    )
+    _, height, width = data_chw.shape
+
+    y_starts = _tile_starts(height, tile_size)
+    x_starts = _tile_starts(width, tile_size)
+    mean_out = None
+    variance_out = None
+
+    for core_y0 in y_starts:
+        core_y1 = min(core_y0 + tile_size, height)
+        tile_y0 = max(0, core_y0 - overlap)
+        tile_y1 = min(height, core_y1 + overlap)
+        for core_x0 in x_starts:
+            core_x1 = min(core_x0 + tile_size, width)
+            tile_x0 = max(0, core_x0 - overlap)
+            tile_x1 = min(width, core_x1 + overlap)
+            tile = data_chw[:, tile_y0:tile_y1, tile_x0:tile_x1]
+            tile_mean, tile_variance = predict(
+                model,
+                tile,
+                device,
+                max_pixels=max_pixels,
+                max_bytes=max_bytes,
+            )
+
+            if mean_out is None:
+                scale = tile_mean.shape[-1] // tile.shape[-1]
+                if scale <= 0 or tile_mean.shape[-2] != tile.shape[-2] * scale:
+                    raise ValueError(
+                        f"model output shape {tile_mean.shape} is not an integer upscale of tile {tile.shape}"
+                    )
+                mean_out = np.empty(
+                    (tile_mean.shape[0], height * scale, width * scale),
+                    dtype=tile_mean.dtype,
+                )
+                variance_out = np.empty_like(mean_out)
+
+            local_y0 = (core_y0 - tile_y0) * scale
+            local_y1 = local_y0 + (core_y1 - core_y0) * scale
+            local_x0 = (core_x0 - tile_x0) * scale
+            local_x1 = local_x0 + (core_x1 - core_x0) * scale
+            out_y0, out_y1 = core_y0 * scale, core_y1 * scale
+            out_x0, out_x1 = core_x0 * scale, core_x1 * scale
+            mean_out[:, out_y0:out_y1, out_x0:out_x1] = tile_mean[:, local_y0:local_y1, local_x0:local_x1]
+            variance_out[:, out_y0:out_y1, out_x0:out_x1] = tile_variance[:, local_y0:local_y1, local_x0:local_x1]
+
+    assert mean_out is not None and variance_out is not None
+    return mean_out, variance_out
 
 
 def _write_npy(path: Path, data: np.ndarray) -> None:
@@ -351,6 +445,18 @@ def main() -> None:
         default=4_000_000_000,
         help="T18: reject input using more raw memory than this before allocation",
     )
+    parser.add_argument(
+        "--tile-size",
+        type=int,
+        default=0,
+        help="T21: input-pixel core size for bounded tiled inference; 0 runs one full-scene pass",
+    )
+    parser.add_argument(
+        "--tile-overlap",
+        type=int,
+        default=64,
+        help="T21: context pixels added around each tile core (default: 64)",
+    )
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -359,7 +465,18 @@ def main() -> None:
     data, metadata = _load_input(args.input, metadata)
 
     data, input_stats = _normalise_input(data, args.input_normalization)
-    mean, variance = predict(model, data, device, max_pixels=args.max_pixels, max_bytes=args.max_bytes)
+    if args.tile_size:
+        mean, variance = predict_tiled(
+            model,
+            data,
+            device,
+            tile_size=args.tile_size,
+            overlap=args.tile_overlap,
+            max_pixels=args.max_pixels,
+            max_bytes=args.max_bytes,
+        )
+    else:
+        mean, variance = predict(model, data, device, max_pixels=args.max_pixels, max_bytes=args.max_bytes)
 
     if args.output_normalization == "same":
         output = mean
@@ -388,6 +505,7 @@ def main() -> None:
 
     print(
         f"inference complete: input={tuple(data.shape)}, output={tuple(output.shape)}, "
+        f"tiled={'yes' if args.tile_size else 'no'}, "
         f"uncertainty={'yes' if args.uncertainty_output else 'no'}, device={device}"
     )
 

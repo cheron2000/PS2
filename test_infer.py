@@ -27,7 +27,15 @@ from rasterio.crs import CRS
 import rasterio
 
 from src.model import SRModel
-from src.infer import load_checkpoint, predict, write_output, _load_input, smoke_test, validate_input_preflight
+from src.infer import (
+    load_checkpoint,
+    predict,
+    predict_tiled,
+    write_output,
+    _load_input,
+    smoke_test,
+    validate_input_preflight,
+)
 
 
 def _make_checkpoint(path, **model_kwargs):
@@ -230,6 +238,66 @@ def test_preflight_runs_before_predict_allocates():
         assert False, "predict() should reject non-finite input via preflight"
     except ValueError as e:
         assert "non-finite" in str(e)
+
+
+def test_tiled_matches_full_scene_reference_with_context():
+    """T21 acceptance: overlap context keeps tiled output close to one pass."""
+    torch.manual_seed(0)
+    model = SRModel(
+        in_channels=4,
+        out_channels=4,
+        base_channels=8,
+        num_attn_blocks=1,
+        window_size=4,
+        num_heads=2,
+        scale=2,
+    )
+    data = np.random.default_rng(7).random((4, 32, 36), dtype=np.float32)
+    device = torch.device("cpu")
+    full_mean, full_variance = predict(model, data, device)
+    tiled_mean, tiled_variance = predict_tiled(
+        model, data, device, tile_size=16, overlap=8, max_pixels=4096
+    )
+
+    assert tiled_mean.shape == full_mean.shape == (4, 64, 72)
+    assert tiled_variance.shape == full_variance.shape
+    # The core of every tile has the same local context as the full pass up to
+    # the model's finite receptive field. The tolerance is deliberately stated
+    # rather than asserting bitwise equality across tile boundaries.
+    assert np.max(np.abs(tiled_mean - full_mean)) < 0.15
+    assert np.max(np.abs(tiled_variance - full_variance)) < 0.15
+    assert np.isfinite(tiled_mean).all() and np.isfinite(tiled_variance).all()
+
+
+def test_tiled_inference_bypasses_whole_scene_pixel_cap():
+    """A scene rejected as one pass succeeds when each bounded tile fits."""
+    model = SRModel(
+        in_channels=4,
+        out_channels=4,
+        base_channels=8,
+        num_attn_blocks=1,
+        window_size=4,
+        num_heads=2,
+        scale=2,
+    )
+    data = np.random.default_rng(8).random((4, 32, 32), dtype=np.float32)
+    device = torch.device("cpu")
+    try:
+        predict(model, data, device, max_pixels=600)
+        raise AssertionError("whole-scene inference should exceed the pixel cap")
+    except ValueError as exc:
+        assert "exceeding max_pixels" in str(exc)
+
+    mean, variance = predict_tiled(
+        model,
+        data,
+        device,
+        tile_size=16,
+        overlap=4,
+        max_pixels=600,
+    )
+    assert mean.shape == variance.shape == (4, 64, 64)
+    assert np.isfinite(mean).all() and np.isfinite(variance).all()
 
 
 def test_npy_write_is_atomic_no_leftover_tmp_on_success():

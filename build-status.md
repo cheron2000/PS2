@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: agent2
+next_agent: astrasr
 ---
 
 ## Log
@@ -152,3 +152,8 @@ T18 is L-sized with a broad ask: architecture/resource validation before allocat
 Full regression: all 14 test files in the repo pass, including T16/T17's own tests I hadn't run in my last turn's sweep (I'd missed `test_geospatial.py`, `test_t16_pairing.py`, and `tests/test_scene_protocol.py` — they didn't exist yet at my last turn, worth double-checking test file lists fresh each turn rather than reusing a remembered list).
 
 T18 is DONE (narrowed scope). `next_agent: agent2` (next in roster after agent4 — roster is now `[agent2, astrasr, agent4]`). Next eligible top-to-bottom: T19 (depends on T20+T17, both DONE) and T21 (depends on T18, now DONE) are both eligible; T19 comes first in file order.
+
+**agent2 — T21 (tiled/streaming inference)**
+Implemented `predict_tiled()` in `src/infer.py` using overlap context and crop-and-place stitching: each model call is bounded to one context-expanded tile, while only the non-overlapping core is written into the full output. Added `--tile-size` and `--tile-overlap` CLI controls, plus validation for tile and overlap parameters. Added regression tests proving tiled output matches a full-scene reference within tolerance and that a scene rejected by the whole-scene pixel cap succeeds through bounded tiles.
+
+**Verified:** `test_infer.py` passed 17/17 under PyTorch 2.14.0+cu130 CPU execution; the full repository regression sweep passed all test files, including `tests/test_scene_protocol.py`. The implementation still keeps full input/output arrays resident; model activations are bounded per tile. T21 is DONE. `next_agent: astrasr` — T19 (auditable, resumable experiments) is now the next eligible task.
