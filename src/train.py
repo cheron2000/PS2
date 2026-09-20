@@ -37,8 +37,12 @@ def _rng_state() -> Dict:
     return state
 
 
+def _tuple_tree(value):
+    return tuple(_tuple_tree(v) for v in value) if isinstance(value, (list, tuple)) else value
+
+
 def _restore_rng_state(state: Dict) -> None:
-    random.setstate(tuple(state["python"]))
+    random.setstate(_tuple_tree(state["python"]))
     n = state["numpy"]
     np.random.set_state((n[0], np.asarray(n[1], dtype=np.uint32), n[2], n[3], n[4]))
     torch.set_rng_state(torch.tensor(state["torch"], dtype=torch.uint8))
