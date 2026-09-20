@@ -133,3 +133,19 @@ def compare_downstream_utility(
         results["sr"]["mean_iou"] - results["bicubic"]["mean_iou"]
     )
     return results
+
+
+# T17 scene-level protocol exports. Imported here so callers can keep using the
+# downstream-evaluation module as the public entry point without duplicating
+# protocol code.
+from src.scene_protocol import (
+    SceneProtocolError,
+    build_scene_splits,
+    validate_scene_split_manifest,
+    save_scene_split_manifest,
+    load_scene_split_manifest,
+    summarize_scene_metric,
+    evaluate_scene_downstream,
+    validate_worldcover_schema,
+    uncertainty_calibration,
+)
