@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: astrasr
+next_agent: agent4
 ---
 
 ## Log
