@@ -58,18 +58,30 @@ def build_validity_mask(scl: np.ndarray, invalid_classes=DEFAULT_INVALID_CLASSES
     return ~invalid
 
 
-def normalize_bands(data: np.ndarray, method: str = "reflectance", stats: dict = None):
+def normalize_bands(data: np.ndarray, method: str = "reflectance", stats: dict = None, reflectance_divisor: float = 10000.0):
     """data: (C, H, W) raw digital-number or reflectance array.
 
     method:
-      "reflectance" — Sentinel-2 L2A convention: DN / 10000, clipped to
-        [0, 1]. No stats needed/returned; this is the standard, deterministic
-        choice and should usually be the default for real Sentinel-2 data.
-      "percentile"  — per-band 2nd/98th percentile stretch to [0, 1]. More
-        robust to outliers (cloud edges, sensor glare) than plain min-max,
-        useful for visualization or when raw DNs aren't already reflectance-scaled.
-      "zscore"      — per-band (x - mean) / std. Useful for training
-        stability if reflectance scaling alone isn't enough.
+      "reflectance" — fixed-divisor scaling to [0, 1]: DN / reflectance_divisor,
+        clipped. Defaults to 10000.0 (Sentinel-2 L2A convention). **This
+        default is only correct for the source it was written for
+        (Sentinel-2-family reflectance products). Applying it unchanged to
+        a source with a different native DN range — e.g. NAIP's 0-255
+        8-bit imagery — silently crushes that source's real range into a
+        tiny sliver of [0, 1] instead of spanning it.** Confirmed as a
+        real bug in this exact form (2026-09-20, external "Wide Research"
+        audit, verified independently by agent4 via direct code
+        inspection before fixing): src/datasets/sen2naip.py called this
+        with the same default divisor for both Sentinel-2 LR and NAIP HR.
+        Fixed there by passing reflectance_divisor=255.0 for the NAIP
+        side — see that file. If you add a new paired dataset with
+        differently-scaled sources, pass the correct divisor per side
+        explicitly; don't assume the default fits both.
+      "percentile"  — per-band 2nd/98th percentile stretch to [0, 1]. Safe
+        to apply identically to differently-scaled sources, since it's
+        computed from each array's own statistics, not a fixed divisor.
+      "zscore"      — per-band (x - mean) / std. Same safety property as
+        percentile — adapts to each array's own scale automatically.
 
     Returns (normalized_data, stats_used) — stats_used lets you invert the
     normalization later (needed to turn model output back into physical
@@ -82,8 +94,8 @@ def normalize_bands(data: np.ndarray, method: str = "reflectance", stats: dict =
         raise ValueError("data must contain only finite values; handle nodata/cloud pixels with a validity mask before normalization")
 
     if method == "reflectance":
-        normalized = np.clip(data.astype(np.float64) / 10000.0, 0.0, 1.0)
-        return normalized, {"method": "reflectance", "divisor": 10000.0}
+        normalized = np.clip(data.astype(np.float64) / reflectance_divisor, 0.0, 1.0)
+        return normalized, {"method": "reflectance", "divisor": reflectance_divisor}
 
     if method == "percentile":
         if stats is None:

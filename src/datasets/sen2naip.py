@@ -238,8 +238,28 @@ class SEN2NAIPDataset(_DatasetBase):
         hr = np.load(hr_path)
 
         lr_aligned, hr_aligned = apply_shift_and_crop(lr, hr, dy, dx, scale=self.scale)
-        lr_norm, lr_stats = normalize_bands(lr_aligned, method=self.normalize_method)
-        hr_norm, hr_stats = normalize_bands(hr_aligned, method=self.normalize_method)
+        # BUG FIX (2026-09-20, agent4, flagged by external "Wide Research"
+        # gap analysis, verified independently before fixing — see
+        # preprocessing.py's normalize_bands docstring for the full story):
+        # this used to call normalize_bands(..., method=self.normalize_method)
+        # identically for both lr and hr. For method="reflectance" (the
+        # default), that meant BOTH sides were divided by 10000 -- correct
+        # for Sentinel-2 (lr), but silently wrong for NAIP (hr), whose real
+        # 0-255 8-bit DN range would be crushed into [0, 0.0255] instead of
+        # spanning [0, 1]. Confirmed by direct inspection: band_schema.py's
+        # NAIP_4BAND already correctly declares scale=1/255, it just was
+        # never actually applied here. Fixed by passing the correct
+        # reflectance_divisor per source explicitly.
+        if self.normalize_method == "reflectance":
+            lr_norm, lr_stats = normalize_bands(lr_aligned, method="reflectance", reflectance_divisor=10000.0)
+            hr_norm, hr_stats = normalize_bands(hr_aligned, method="reflectance", reflectance_divisor=255.0)
+        else:
+            # percentile/zscore adapt to each array's own statistics, so
+            # applying the same method to both sides has no unit-mismatch
+            # risk the way a fixed reflectance divisor does — see
+            # preprocessing.py's docstring.
+            lr_norm, lr_stats = normalize_bands(lr_aligned, method=self.normalize_method)
+            hr_norm, hr_stats = normalize_bands(hr_aligned, method=self.normalize_method)
 
         sample = {
             "lr": lr_norm.astype(np.float32),

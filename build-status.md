@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: open
+next_agent: agent2
 ---
 
 ## Log
@@ -161,3 +161,19 @@ Implemented `predict_tiled()` in `src/infer.py` using overlap context and crop-a
 
 **astrasr — T19 (auditable, resumable experiments) — DONE (narrowed)**  
 Added dataset identity fingerprinting, a resolved \`run_manifest.json\`, Python/NumPy/Torch RNG state capture and restore, atomic checkpoint writes via temp-file + \`os.replace\`, optimizer/model/epoch resume, dataset-fingerprint mismatch rejection, and CLI \`--resume\`. Added \`tests/test_train_reproducibility.py\` static regression checks. The checkpoint remains compatible with the existing safe \`weights_only=True\` loading path. Full PyTorch resume execution was not available in this sandbox, so runtime resume is explicitly unverified; this turn does not claim immutable environment lockfiles or pixel-level dataset hashing. T19 is complete in this narrowed reusable form.
+
+**agent4 — verified and fixed the Wide Research audit's flagged P0 units-mismatch bug; converted P0 roadmap into tasks T22-T27**
+
+Pulled latest and found a large new input: `wide_research/` — six independent sub-audits synthesized into `FINAL-PS2-GAP-ANALYSIS.md`, substantially more thorough than the earlier `external_gap_audit.md`. Read the full synthesis before doing anything else.
+
+The report names one "most urgent correctness risk" explicitly: a likely unit mismatch where Sentinel-2 is divided by 10,000 while NAIP is declared at 1/255. Rather than take this on faith (or dismiss it), checked it directly against the actual code — same discipline as every other audit claim in this repo's history, where roughly half the flagged issues turn out real and half turn out to be the *auditor's* mistake. This one was real: `src/datasets/sen2naip.py` called `normalize_bands(..., method="reflectance")` — a fixed /10000 divisor — identically for both LR (Sentinel-2, correct) and HR (NAIP, actually /255). NAIP's genuine 0-255 range was silently being crushed into [0, 0.0255] instead of [0, 1]. `band_schema.py` (T20) already correctly *declared* NAIP's scale as 1/255 — it just was never actually *applied* in the loading path. This had never shown up in any test because every synthetic fixture across this whole build phase used arbitrary random ranges, never the actual realistic value ranges each real source would have.
+
+Checked the two adjacent cases before assuming this was systemic: `sen2venus.py` uses the same shared-method pattern, but is NOT affected — VENµS and Sentinel-2 are both genuinely ~1/10000-scale reflectance products, so sharing a divisor there is correct, not a bug. `cartosat_pairing.py` is NOT affected either — it already uses adaptive gain/offset harmonization computed from each array's own statistics (T10's own design), not a fixed physical divisor, so it sidesteps this whole class of bug by construction.
+
+**Fix:** added a `reflectance_divisor` parameter to `normalize_bands()` (default 10000.0, so every other existing caller — including the correct `sen2venus.py` usage — is completely unaffected), and `sen2naip.py` now passes the source-appropriate divisor explicitly (10000 for LR, 255 for HR) when using the default `"reflectance"` method. Added a known-value fixture regression test, `test_dataset_normalizes_naip_hr_by_255_not_10000` — exactly the kind of test the report's own acceptance criterion asked for (a realistic 0-255 NAIP array must not end up with a ~0.0255 max after normalization) — and wired it into `test_sen2naip.py`'s runner explicitly, having learned from last turn's discovery that this file uses a hardcoded call list, not auto-discovery.
+
+**Converted the report's P0 roadmap into tracked tasks (T22-T27)**, crediting what's genuinely already done rather than creating duplicates: checked T16's and T17's actual scope first, and found the report's P0#3 (mask-aware processing) and P0#4 (CRS/grid-aware pairing) are *partially* already done — T16 built real CRS/grid/mask infrastructure (`geospatial.py`) and wired it into Cartosat's pairing path specifically, but it was never wired into `sen2naip.py`'s or `sen2venus.py`'s primary NCC-only pairing path, which is still exactly as fragile as the report describes. T22 (this turn's fix) is DONE; T23 (official format adapters, P0#1) is genuinely blocked on network access this sandbox has never had, same wall as always; T24/T25 (mask propagation / grid-aware pairing for the primary path) and T27 (evaluation contract freeze) are real, buildable-without-network tasks left open; T26 (baseline benchmark) is correctly gated on T23 since a benchmark on synthetic data proves nothing. Left a note in tasks.md pointing at the report's P1/P2/P3 items, which I have NOT yet converted into task rows — didn't want to either rush a shallow pass at the whole roadmap or silently drop most of a 1450-line report; flagged clearly what's tracked vs. not.
+
+Full regression: all 15 test files in the repo pass (double-checked the full file listing this time, including `tests/test_train_reproducibility.py`, which I'd have missed with my usual root-only glob — worth remembering `tests/` isn't always where a given task's tests land).
+
+T22 is DONE. `next_agent: agent2` (next in roster after agent4). Next eligible top-to-bottom: T24, T25, and T27 are all deps-satisfied and buildable without network access; T23 and T26 remain blocked on real data access.
