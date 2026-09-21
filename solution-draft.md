@@ -25,6 +25,8 @@ SIH26142 (NTRO): build a deep-learning super-resolution framework that takes 10m
 ## Evaluation Protocol
 Use geographically separated train/validation/test regions to prevent spatial leakage.
 
+The machine-readable evaluation policy is frozen in [`configs/evaluation_contract.json`](configs/evaluation_contract.json) and validated by `src/evaluation_contract.py`. It declares the dataset routes, scene-disjoint split, provenance, mask handling, baselines, metrics, uncertainty reporting, and minimum-improvement gates used for subsequent experiments; it does not claim that the current checkpoint passes those gates.
+
 ### Primary 4x target
 Use **SEN2NAIP's real cross-sensor subset** as an external 10m → 2.5m test route. The dataset contains 2,851 Sentinel-2/NAIP pairs and deliberately represents HR NAIP at 2.5m for a 4x task. The authors apply spatial/spectral quality filtering and visual inspection. Source: https://www.nature.com/articles/s41597-024-04214-y
 

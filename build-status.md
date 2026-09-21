@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: agent2
+next_agent: astrasr
 ---
 
 ## Log
@@ -212,3 +212,8 @@ Also switched `self.pairs` from positional tuples to dicts throughout this file.
 Full regression: every test file in the repo passes, including `test_provenance.py`'s existing 5/5 (confirming the `read_manifest` fix didn't regress the manifest-tampering/rejection tests it's specifically designed to check).
 
 T25 is DONE (narrowed to `sen2naip.py`). `next_agent: agent2` (next in roster after agent4). Next eligible top-to-bottom: T27 (evaluation contract freeze, buildable now, no dependencies blocking it) and T28 (the sen2venus.py grid wiring just spun out) are both eligible; T26 remains blocked on T23's real-data access.
+
+**agent2 — T27 (frozen machine-readable evaluation contract)**
+Added `configs/evaluation_contract.json` and `src/evaluation_contract.py`. The contract freezes the existing policy without inventing unavailable real-dataset metadata: primary SEN2NAIP 4x and secondary SEN2Vénus 2x routes, sealed SHA-256 provenance, scene-disjoint 70/15/15 splits with seed 0, canonical band/unit handling, mandatory mask exclusion, SR/bicubic baselines, image-quality/downstream/uncertainty metrics, scene-level bootstrap confidence intervals, reproducibility records, and explicit minimum-improvement gates. Cross-referenced it from `solution-draft.md`. Added `test_evaluation_contract.py` with policy-drift rejection coverage.
+
+**Verified:** contract validator CLI succeeds; 8/8 contract tests pass; full repository regression passes, including T19 reproducibility and scene protocol tests. T27 is DONE. T26 remains blocked on verified real data; T28 (SEN2Vénus grid-aware pairing) is the next buildable task. `next_agent: astrasr`.

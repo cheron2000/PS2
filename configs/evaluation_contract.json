@@ -1,0 +1,182 @@
+{
+  "contract_version": 1,
+  "contract_id": "si26142-sentinel2-sr-evaluation-v1",
+  "status": "frozen-policy",
+  "task": {
+    "name": "Sentinel-2 super-resolution",
+    "input_product": "Sentinel-2 L2A",
+    "input_bands": ["blue", "green", "red", "nir"],
+    "input_gsd_m": 10,
+    "primary_output_gsd_m": 2.5,
+    "secondary_output_gsd_m": 5.0,
+    "output_units": "reflectance",
+    "output_includes_uncertainty": true
+  },
+  "datasets": {
+    "primary": {
+      "id": "sen2naip",
+      "route": "real-cross-sensor-test",
+      "train_source": "SEN2NAIPv2 synthetic or verified converter output",
+      "test_source": "SEN2NAIP real cross-sensor subset",
+      "scale_factor": 4,
+      "target_product": "NAIP",
+      "required_provenance": "sealed_sha256_manifest"
+    },
+    "secondary": {
+      "id": "sen2venus",
+      "route": "same-day-secondary-validation",
+      "train_source": "not used for primary claim",
+      "test_source": "SEN2Vénus verified converter output",
+      "scale_factor": 2,
+      "target_product": "VENµS",
+      "required_provenance": "sealed_sha256_manifest"
+    },
+    "india_holdout": {
+      "id": "cartosat_india",
+      "route": "optional-generalization-holdout",
+      "required_for_primary_pass": false,
+      "source_requirement": "verified Cartosat-2S or Cartosat-3 product with license metadata",
+      "required_provenance": "sealed_sha256_manifest"
+    }
+  },
+  "split_policy": {
+    "unit": "scene",
+    "fractions": {
+      "train": 0.7,
+      "val": 0.15,
+      "test": 0.15
+    },
+    "seed": 0,
+    "scene_disjoint": true,
+    "sample_disjoint": true,
+    "test_used_for_model_selection": false,
+    "implementation": "src.scene_protocol.build_scene_splits",
+    "manifest_schema_version": 1
+  },
+  "preprocessing_policy": {
+    "canonical_band_order": ["blue", "green", "red", "nir"],
+    "sentinel2_reflectance_divisor": 10000.0,
+    "naip_reflectance_divisor": 255.0,
+    "normalization_method": "reflectance",
+    "alignment": {
+      "require_crs_and_grid_when_metadata_available": true,
+      "reject_non_scale_aligned_shift": true,
+      "fallback_without_grid_metadata": "shape-and-registration-qc-only"
+    }
+  },
+  "mask_policy": {
+    "required_for_real_evaluation": true,
+    "sources": ["cloud", "scl", "qa", "nodata", "geospatial_validity"],
+    "combine": "intersection",
+    "invalid_pixels_excluded_from": ["normalization", "loss", "image_metrics", "downstream_metrics", "uncertainty_metrics"],
+    "minimum_valid_fraction_per_patch": 0.8,
+    "empty_valid_set": "reject",
+    "implementation": ["src.preprocessing.normalize_bands", "src.metrics", "src.scene_protocol.uncertainty_calibration"]
+  },
+  "baselines": {
+    "required": [
+      {
+        "id": "bicubic",
+        "role": "mandatory_lr_upsampling_baseline",
+        "implementation_status": "existing-or-to-be-wired"
+      },
+      {
+        "id": "sr",
+        "role": "candidate_model",
+        "implementation_status": "existing"
+      }
+    ],
+    "conditional": [
+      {
+        "id": "hr_reference",
+        "role": "upper_reference_when_independent_hr_exists",
+        "implementation_status": "existing"
+      },
+      {
+        "id": "nearest",
+        "role": "sanity_baseline",
+        "implementation_status": "optional"
+      },
+      {
+        "id": "external_published_model",
+        "role": "prior_art_or_external_comparator",
+        "implementation_status": "optional-and-version-pinned"
+      }
+    ],
+    "same_input_and_mask_across_methods": true,
+    "same_test_scene_ids_across_methods": true
+  },
+  "metrics": {
+    "image_quality_required": [
+      "psnr_db",
+      "ssim",
+      "sam_degrees",
+      "alignment_ncc"
+    ],
+    "downstream_required": [
+      "mean_iou",
+      "overall_accuracy",
+      "per_class_iou"
+    ],
+    "uncertainty_required": [
+      "gaussian_nll",
+      "mean_standardized_squared_error",
+      "coverage_0.50",
+      "coverage_0.80",
+      "coverage_0.90",
+      "coverage_0.95"
+    ],
+    "aggregation": {
+      "primary_unit": "scene",
+      "report_per_scene": true,
+      "report_macro_mean": true,
+      "bootstrap_confidence": 0.95,
+      "bootstrap_seed": 0,
+      "bootstrap_implementation": "src.scene_protocol.summarize_scene_metric"
+    },
+    "implementation": ["src.metrics.metric_report", "src.scene_protocol.evaluate_scene_downstream", "src.scene_protocol.uncertainty_calibration"]
+  },
+  "minimum_improvement_gates": {
+    "comparison": "sr_minus_bicubic",
+    "primary_downstream_mean_iou_delta": {
+      "minimum_absolute_delta": 0.01,
+      "direction": "higher_is_better"
+    },
+    "image_quality_non_regression": {
+      "psnr_db_delta_minimum": 0.0,
+      "ssim_delta_minimum": 0.0,
+      "sam_degrees_delta_maximum": 0.0,
+      "alignment_ncc_delta_minimum": 0.0
+    },
+    "uncertainty_calibration": {
+      "coverage_absolute_error_maximum": 0.05,
+      "levels": [0.5, 0.8, 0.9, 0.95]
+    },
+    "interpretation": "A gate is evaluated on the held-out test aggregate and must be reported with scene-level 95% confidence intervals; it is not a claim that the current checkpoint passes."
+  },
+  "reproducibility": {
+    "manifest_required": true,
+    "manifest_checksum": "sha256",
+    "random_seed": 0,
+    "record_model_checkpoint": true,
+    "record_code_revision": true,
+    "record_environment": true,
+    "record_config_snapshot": true,
+    "resume_fingerprint_must_match": true
+  },
+  "reporting_requirements": {
+    "must_report": [
+      "dataset_and_product_version",
+      "scene_split_manifest_checksum",
+      "source_provenance_manifest_checksum",
+      "valid_pixel_fraction",
+      "all_required_metrics",
+      "per_scene_results",
+      "macro_aggregate_and_95_percent_ci",
+      "baseline_deltas",
+      "failed_or_missing_gates"
+    ],
+    "real_data_claim_requires": "verified_product_fixture_and_sealed_provenance_manifest",
+    "synthetic_only_result_label": "development-only-not-real-world-validation"
+  }
+}
