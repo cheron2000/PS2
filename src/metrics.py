@@ -156,7 +156,7 @@ def _ncc(a, b):
     denom = np.linalg.norm(aa) * np.linalg.norm(bb)
     return 0.0 if denom == 0 else float(np.dot(aa, bb) / denom)
 
-def spatial_alignment_check(prediction, target, max_shift=4, min_ncc=0.90) -> Dict[str, object]:
+def spatial_alignment_check(prediction, target, max_shift=4, min_ncc=0.90, valid_mask=None) -> Dict[str, object]:
     """Search integer shifts and report best NCC, overlap, and pass/fail."""
     pred, true = _validate_pair(prediction, target)
     if max_shift < 0:
@@ -164,6 +164,17 @@ def spatial_alignment_check(prediction, target, max_shift=4, min_ncc=0.90) -> Di
     if not 0.0 <= min_ncc <= 1.0:
         raise ValueError("min_ncc must be in [0, 1]")
     h, w = pred.shape[-2:]
+    alignment_mask = None
+    if valid_mask is not None:
+        alignment_mask = np.asarray(valid_mask, dtype=bool)
+        if alignment_mask.shape == (h, w):
+            pass
+        elif alignment_mask.shape == pred.shape:
+            alignment_mask = np.all(alignment_mask, axis=0)
+        else:
+            raise ValueError(f"valid_mask shape {alignment_mask.shape} does not match image")
+        if not np.any(alignment_mask):
+            raise ValueError("valid_mask contains no valid pixels")
     best_score, best_dy, best_dx, best_overlap = -1.0, 0, 0, 0.0
     for dy in range(-max_shift, max_shift + 1):
         for dx in range(-max_shift, max_shift + 1):
@@ -173,6 +184,12 @@ def spatial_alignment_check(prediction, target, max_shift=4, min_ncc=0.90) -> Di
             y_p, x_p, y_t, x_t = slices
             p_overlap = pred[..., y_p, x_p]
             t_overlap = true[..., y_t, x_t]
+            if alignment_mask is not None:
+                mask_overlap = alignment_mask[y_t, x_t]
+                if not np.any(mask_overlap):
+                    continue
+                p_overlap = p_overlap[..., mask_overlap]
+                t_overlap = t_overlap[..., mask_overlap]
             score = _ncc(p_overlap, t_overlap)
             overlap = p_overlap.shape[-2] * p_overlap.shape[-1] / float(h * w)
             if score > best_score or (np.isclose(score, best_score) and overlap > best_overlap):
@@ -187,7 +204,7 @@ def spatial_alignment_check(prediction, target, max_shift=4, min_ncc=0.90) -> Di
 
 def metric_report(prediction, target, data_range=1.0, ssim_window=11, valid_mask=None) -> Dict[str, float]:
     """Return PSNR, SSIM, SAM and spatial-alignment diagnostics."""
-    alignment = spatial_alignment_check(prediction, target)
+    alignment = spatial_alignment_check(prediction, target, valid_mask=valid_mask)
     return {
         "psnr_db": psnr(prediction, target, data_range, valid_mask),
         "ssim": ssim(prediction, target, data_range, ssim_window, valid_mask),
