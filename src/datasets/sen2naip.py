@@ -193,7 +193,7 @@ class SEN2NAIPDataset(_DatasetBase):
             lr_files = sorted(glob.glob(os.path.join(root, "lr", "*.npy")))
             manifest_pairs = [
                 (os.path.splitext(os.path.basename(path))[0], path,
-                 os.path.join(root, "hr", os.path.splitext(os.path.basename(path))[0] + ".npy"))
+                 os.path.join(root, "hr", os.path.splitext(os.path.basename(path))[0] + ".npy"), None, None)
                 for path in lr_files
             ]
         if not manifest_pairs:
@@ -205,7 +205,7 @@ class SEN2NAIPDataset(_DatasetBase):
         self.pairs = []       # list of (lr_path, hr_path, dy, dx, ncc_score)
         self.dropped_pairs = []  # list of (id, reason) for pairs excluded at load time
 
-        for file_id, lr_path, hr_path in manifest_pairs:
+        for file_id, lr_path, hr_path, lr_mask_path, hr_mask_path in manifest_pairs:
             if not os.path.exists(hr_path):
                 self.dropped_pairs.append((file_id, "no matching HR file"))
                 continue
@@ -252,17 +252,35 @@ class SEN2NAIPDataset(_DatasetBase):
                 self.dropped_pairs.append((file_id, f"NCC score {score:.3f} below threshold {min_ncc_score}"))
                 continue
 
-            self.pairs.append((lr_path, hr_path, dy, dx, score))
+            self.pairs.append((lr_path, hr_path, dy, dx, score, lr_mask_path, hr_mask_path))
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
-        lr_path, hr_path, dy, dx, score = self.pairs[idx]
+        lr_path, hr_path, dy, dx, score, lr_mask_path, hr_mask_path = self.pairs[idx]
         lr = np.load(lr_path)
         hr = np.load(hr_path)
 
         lr_aligned, hr_aligned = apply_shift_and_crop(lr, hr, dy, dx, scale=self.scale)
+        lr_mask_aligned = None
+        valid_mask = None
+        if lr_mask_path or hr_mask_path:
+            lr_mask = np.ones(lr.shape[1:], dtype=bool) if lr_mask_path is None else np.asarray(np.load(lr_mask_path), dtype=bool)
+            hr_mask = np.ones(hr.shape[1:], dtype=bool) if hr_mask_path is None else np.asarray(np.load(hr_mask_path), dtype=bool)
+            if lr_mask.shape != lr.shape[1:] or hr_mask.shape != hr.shape[1:]:
+                raise ValueError("LR/HR validity masks must match source spatial shapes")
+            lr_mask_aligned, hr_mask_aligned = apply_shift_and_crop(
+                lr_mask[None, ...].astype(np.float32),
+                hr_mask[None, ...].astype(np.float32),
+                dy, dx, scale=self.scale,
+            )
+            lr_mask_aligned = lr_mask_aligned[0].astype(bool)
+            hr_mask_aligned = hr_mask_aligned[0].astype(bool)
+            valid_mask = hr_mask_aligned & np.repeat(
+                np.repeat(lr_mask_aligned, self.scale, axis=0),
+                self.scale, axis=1,
+            )
         # BUG FIX (2026-09-20, agent4, flagged by external "Wide Research"
         # gap analysis, verified independently before fixing — see
         # preprocessing.py's normalize_bands docstring for the full story):
@@ -276,15 +294,15 @@ class SEN2NAIPDataset(_DatasetBase):
         # never actually applied here. Fixed by passing the correct
         # reflectance_divisor per source explicitly.
         if self.normalize_method == "reflectance":
-            lr_norm, lr_stats = normalize_bands(lr_aligned, method="reflectance", reflectance_divisor=10000.0)
-            hr_norm, hr_stats = normalize_bands(hr_aligned, method="reflectance", reflectance_divisor=255.0)
+            lr_norm, lr_stats = normalize_bands(lr_aligned, method="reflectance", reflectance_divisor=10000.0, valid_mask=lr_mask_aligned)
+            hr_norm, hr_stats = normalize_bands(hr_aligned, method="reflectance", reflectance_divisor=255.0, valid_mask=valid_mask)
         else:
             # percentile/zscore adapt to each array's own statistics, so
             # applying the same method to both sides has no unit-mismatch
             # risk the way a fixed reflectance divisor does — see
             # preprocessing.py's docstring.
-            lr_norm, lr_stats = normalize_bands(lr_aligned, method=self.normalize_method)
-            hr_norm, hr_stats = normalize_bands(hr_aligned, method=self.normalize_method)
+            lr_norm, lr_stats = normalize_bands(lr_aligned, method=self.normalize_method, valid_mask=lr_mask_aligned)
+            hr_norm, hr_stats = normalize_bands(hr_aligned, method=self.normalize_method, valid_mask=valid_mask)
 
         sample = {
             "lr": lr_norm.astype(np.float32),
@@ -293,6 +311,7 @@ class SEN2NAIPDataset(_DatasetBase):
             "hr_stats": hr_stats,
             "alignment_shift": (dy, dx),
             "alignment_score": score,
+            **({"valid_mask": valid_mask} if valid_mask is not None else {}),
         }
         if _HAS_TORCH:
             sample["lr"] = torch.from_numpy(sample["lr"])
