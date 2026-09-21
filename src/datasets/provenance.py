@@ -115,8 +115,10 @@ def build_pair_manifest(
             raise ProvenanceError(f"duplicate pair id: {pair_id}")
         seen_ids.add(pair_id)
         pair_files: dict[str, str] = {}
-        for role in ("lr_path", "hr_path"):
+        for role in ("lr_path", "hr_path", "lr_mask_path", "hr_mask_path"):
             if role not in pair:
+                if role.endswith("_mask_path"):
+                    continue
                 raise ProvenanceError(f"pair {pair_id!r} is missing {role}")
             rel = _relative_path(root_path, pair[role])
             absolute = root_path / rel
@@ -199,7 +201,7 @@ def read_manifest(
         for pair in manifest["pairs"]:
             if not isinstance(pair, dict) or not isinstance(pair.get("id"), str):
                 raise ProvenanceError("each manifest pair must be an object with a string id")
-            for role in ("lr_path", "hr_path"):
+            for role in ("lr_path", "hr_path", "lr_mask_path", "hr_mask_path"):
                 rel = pair.get(role)
                 if (
                     not isinstance(rel, str)
