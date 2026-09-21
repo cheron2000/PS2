@@ -83,14 +83,24 @@ def _load_input(path: str | Path, metadata: Optional[Dict[str, Any]] = None) -> 
     return data, metadata
 
 
-def _normalise_input(data: np.ndarray, mode: str) -> Tuple[np.ndarray, Dict[str, Any]]:
+def _normalise_input(data: np.ndarray, mode: str, valid_mask: Optional[np.ndarray] = None) -> Tuple[np.ndarray, Dict[str, Any]]:
+    mask = None
+    if valid_mask is not None:
+        mask = np.asarray(valid_mask, dtype=bool)
+        if mask.shape != data.shape[-2:]:
+            raise ValueError(f"valid_mask shape {mask.shape} does not match input spatial shape {data.shape[-2:]}")
+        if not np.any(mask):
+            raise ValueError("valid_mask contains no valid pixels")
+        if not np.isfinite(data[:, mask]).all():
+            raise ValueError("valid input pixels must be finite")
+        data = np.where(mask[None, ...], data, 0.0)
     if mode == "none":
-        return data.astype(np.float32, copy=False), {"method": "none"}
+        return data.astype(np.float32, copy=False), {"method": "none", "valid_mask_applied": mask is not None}
     if mode == "reflectance":
-        return np.clip(data / 10000.0, 0.0, 1.0).astype(np.float32), {
-            "method": "reflectance",
-            "divisor": 10000.0,
-        }
+        normalized = np.clip(data / 10000.0, 0.0, 1.0).astype(np.float32)
+        if mask is not None:
+            normalized[:, ~mask] = 0.0
+        return normalized, {"method": "reflectance", "divisor": 10000.0, "valid_mask_applied": mask is not None}
     raise ValueError("input normalization must be 'none' or 'reflectance'")
 
 
@@ -424,6 +434,10 @@ def main() -> None:
         help="Use reflectance to convert Sentinel-2 L2A DN values with DN/10000",
     )
     parser.add_argument(
+        "--valid-mask",
+        help="Optional .npy boolean HxW mask (True=valid). Invalid input pixels are zeroed and excluded from outputs.",
+    )
+    parser.add_argument(
         "--output-normalization",
         choices=("same", "reflectance", "none"),
         default="same",
@@ -463,8 +477,12 @@ def main() -> None:
     model, config = load_checkpoint(args.checkpoint, device)
     metadata = _load_json(args.metadata_json)
     data, metadata = _load_input(args.input, metadata)
-
-    data, input_stats = _normalise_input(data, args.input_normalization)
+    valid_mask = None
+    if args.valid_mask:
+        valid_mask = np.asarray(np.load(args.valid_mask), dtype=bool)
+        if valid_mask.shape != data.shape[-2:]:
+            raise ValueError(f"valid mask shape {valid_mask.shape} does not match input spatial shape {data.shape[-2:]}")
+    data, input_stats = _normalise_input(data, args.input_normalization, valid_mask=valid_mask)
     if args.tile_size:
         mean, variance = predict_tiled(
             model,
@@ -499,6 +517,10 @@ def main() -> None:
         output_variance = variance
 
     scale = int(config.get("scale", 4))
+    if valid_mask is not None:
+        output_mask = np.repeat(np.repeat(valid_mask, scale, axis=0), scale, axis=1)
+        output = np.where(output_mask[None, ...], output, 0.0)
+        output_variance = np.where(output_mask[None, ...], output_variance, 0.0)
     write_output(args.output, output, metadata, scale)
     if args.uncertainty_output:
         write_output(args.uncertainty_output, output_variance, metadata, scale)
