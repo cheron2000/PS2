@@ -58,7 +58,7 @@ def build_validity_mask(scl: np.ndarray, invalid_classes=DEFAULT_INVALID_CLASSES
     return ~invalid
 
 
-def normalize_bands(data: np.ndarray, method: str = "reflectance", stats: dict = None, reflectance_divisor: float = 10000.0):
+def normalize_bands(data: np.ndarray, method: str = "reflectance", stats: dict = None, reflectance_divisor: float = 10000.0, valid_mask: np.ndarray = None):
     """data: (C, H, W) raw digital-number or reflectance array.
 
     method:
@@ -90,32 +90,58 @@ def normalize_bands(data: np.ndarray, method: str = "reflectance", stats: dict =
     """
     if data.ndim != 3:
         raise ValueError(f"expected (C, H, W) array, got shape {data.shape}")
-    if not np.isfinite(data).all():
-        raise ValueError("data must contain only finite values; handle nodata/cloud pixels with a validity mask before normalization")
+    mask = None
+    if valid_mask is not None:
+        mask = np.asarray(valid_mask, dtype=bool)
+        if mask.shape != data.shape[-2:]:
+            raise ValueError(f"valid_mask shape {mask.shape} doesn't match data spatial shape {data.shape[-2:]}")
+        if not np.any(mask):
+            raise ValueError("valid_mask contains no valid pixels")
+        if not np.isfinite(data[:, mask]).all():
+            raise ValueError("valid pixels must contain only finite values")
+        work_data = np.where(mask[None, ...], data, 0.0)
+    else:
+        if not np.isfinite(data).all():
+            raise ValueError("data must contain only finite values; provide a validity mask for nodata/cloud pixels")
+        work_data = data
 
     if method == "reflectance":
-        normalized = np.clip(data.astype(np.float64) / reflectance_divisor, 0.0, 1.0)
-        return normalized, {"method": "reflectance", "divisor": reflectance_divisor}
+        normalized = np.clip(work_data.astype(np.float64) / reflectance_divisor, 0.0, 1.0)
+        if mask is not None:
+            normalized[:, ~mask] = 0.0
+        return normalized, {"method": "reflectance", "divisor": reflectance_divisor, "valid_mask_applied": mask is not None}
 
     if method == "percentile":
         if stats is None:
-            lo = np.percentile(data, 2, axis=(1, 2), keepdims=True)
-            hi = np.percentile(data, 98, axis=(1, 2), keepdims=True)
+            if mask is None:
+                lo = np.percentile(work_data, 2, axis=(1, 2), keepdims=True)
+                hi = np.percentile(work_data, 98, axis=(1, 2), keepdims=True)
+            else:
+                lo = np.array([np.percentile(work_data[c][mask], 2) for c in range(data.shape[0])])[:, None, None]
+                hi = np.array([np.percentile(work_data[c][mask], 98) for c in range(data.shape[0])])[:, None, None]
         else:
             lo, hi = stats["lo"], stats["hi"]
         denom = np.where(hi - lo == 0, 1.0, hi - lo)
-        normalized = np.clip((data.astype(np.float64) - lo) / denom, 0.0, 1.0)
-        return normalized, {"method": "percentile", "lo": lo, "hi": hi}
+        normalized = np.clip((work_data.astype(np.float64) - lo) / denom, 0.0, 1.0)
+        if mask is not None:
+            normalized[:, ~mask] = 0.0
+        return normalized, {"method": "percentile", "lo": lo, "hi": hi, "valid_mask_applied": mask is not None}
 
     if method == "zscore":
         if stats is None:
-            mean = data.mean(axis=(1, 2), keepdims=True)
-            std = data.std(axis=(1, 2), keepdims=True)
+            if mask is None:
+                mean = data.mean(axis=(1, 2), keepdims=True)
+                std = data.std(axis=(1, 2), keepdims=True)
+            else:
+                mean = np.array([data[c][mask].mean() for c in range(data.shape[0])])[:, None, None]
+                std = np.array([data[c][mask].std() for c in range(data.shape[0])])[:, None, None]
         else:
             mean, std = stats["mean"], stats["std"]
         std_safe = np.where(std == 0, 1.0, std)
-        normalized = (data.astype(np.float64) - mean) / std_safe
-        return normalized, {"method": "zscore", "mean": mean, "std": std}
+        normalized = (work_data.astype(np.float64) - mean) / std_safe
+        if mask is not None:
+            normalized[:, ~mask] = 0.0
+        return normalized, {"method": "zscore", "mean": mean, "std": std, "valid_mask_applied": mask is not None}
 
     raise ValueError(f"unknown normalization method: {method!r}")
 
