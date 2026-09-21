@@ -75,6 +75,8 @@ class SEN2VenusDataset(_DatasetBase):
                     str(pair["id"]),
                     os.path.join(root, pair["lr_path"]),
                     os.path.join(root, pair["hr_path"]),
+                    os.path.join(root, pair["lr_mask_path"]) if pair.get("lr_mask_path") else None,
+                    os.path.join(root, pair["hr_mask_path"]) if pair.get("hr_mask_path") else None,
                 )
                 for pair in manifest["pairs"]
             ]
@@ -82,7 +84,7 @@ class SEN2VenusDataset(_DatasetBase):
             lr_files = sorted(glob.glob(os.path.join(root, "lr", "*.npy")))
             manifest_pairs = [
                 (os.path.splitext(os.path.basename(path))[0], path,
-                 os.path.join(root, "hr", os.path.splitext(os.path.basename(path))[0] + ".npy"))
+                 os.path.join(root, "hr", os.path.splitext(os.path.basename(path))[0] + ".npy"), None, None)
                 for path in lr_files
             ]
         if not manifest_pairs:
@@ -93,7 +95,7 @@ class SEN2VenusDataset(_DatasetBase):
 
         self.pairs = []
         self.dropped_pairs = []
-        for file_id, lr_path, hr_path in manifest_pairs:
+        for file_id, lr_path, hr_path, lr_mask_path, hr_mask_path in manifest_pairs:
             if not os.path.exists(hr_path):
                 self.dropped_pairs.append((file_id, "no matching HR file"))
                 continue
@@ -118,23 +120,41 @@ class SEN2VenusDataset(_DatasetBase):
                     (file_id, f"NCC score {score:.3f} below threshold {self.min_ncc_score}")
                 )
                 continue
-            self.pairs.append((lr_path, hr_path, dy, dx, score))
+            self.pairs.append((lr_path, hr_path, dy, dx, score, lr_mask_path, hr_mask_path))
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
-        lr_path, hr_path, dy, dx, score = self.pairs[idx]
+        lr_path, hr_path, dy, dx, score, lr_mask_path, hr_mask_path = self.pairs[idx]
         lr = np.load(lr_path)
         hr = np.load(hr_path)
         lr_aligned, hr_aligned = apply_shift_and_crop(
             lr, hr, dy, dx, scale=self.scale
         )
+        lr_mask_aligned = None
+        valid_mask = None
+        if lr_mask_path or hr_mask_path:
+            lr_mask = np.ones(lr.shape[1:], dtype=bool) if lr_mask_path is None else np.asarray(np.load(lr_mask_path), dtype=bool)
+            hr_mask = np.ones(hr.shape[1:], dtype=bool) if hr_mask_path is None else np.asarray(np.load(hr_mask_path), dtype=bool)
+            if lr_mask.shape != lr.shape[1:] or hr_mask.shape != hr.shape[1:]:
+                raise ValueError("LR/HR validity masks must match source spatial shapes")
+            lr_mask_aligned, hr_mask_aligned = apply_shift_and_crop(
+                lr_mask[None, ...].astype(np.float32),
+                hr_mask[None, ...].astype(np.float32),
+                dy, dx, scale=self.scale,
+            )
+            lr_mask_aligned = lr_mask_aligned[0].astype(bool)
+            hr_mask_aligned = hr_mask_aligned[0].astype(bool)
+            valid_mask = hr_mask_aligned & np.repeat(
+                np.repeat(lr_mask_aligned, self.scale, axis=0),
+                self.scale, axis=1,
+            )
         lr_norm, lr_stats = normalize_bands(
-            lr_aligned, method=self.normalize_method
+            lr_aligned, method=self.normalize_method, valid_mask=lr_mask_aligned
         )
         hr_norm, hr_stats = normalize_bands(
-            hr_aligned, method=self.normalize_method
+            hr_aligned, method=self.normalize_method, valid_mask=valid_mask
         )
         sample = {
             "lr": lr_norm.astype(np.float32),
@@ -144,6 +164,7 @@ class SEN2VenusDataset(_DatasetBase):
             "alignment_shift": (dy, dx),
             "alignment_score": score,
             "scale": self.scale,
+            **({"valid_mask": valid_mask} if valid_mask is not None else {}),
         }
         if _HAS_TORCH:
             sample["lr"] = torch.from_numpy(sample["lr"])
