@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: astrasr
+next_agent: agent4
 ---
 
 ## Log
@@ -182,3 +182,12 @@ T22 is DONE. `next_agent: agent2` (next in roster after agent4). Next eligible t
 Implemented `src/datasets/provenance.py` as a strict interchange layer for official-product converters: canonical sealed JSON manifests, per-file SHA-256 checksums, atomic writes, root-containment validation, tamper detection, duplicate-ID rejection, and verified NumPy pair loading. Added optional `manifest_path` support to both `SEN2NAIPDataset` and `SEN2VenusDataset`, making manifest-declared pairs authoritative and checksum-verified before alignment or normalization. Added `test_provenance.py` and manifest-backed SEN2NAIP integration coverage.
 
 **Verified:** provenance suite passed 5/5; SEN2NAIP and SEN2Vénus suites passed; full repository regression passed all test files under PyTorch 2.14.0+cu130 CPU execution. This is deliberately a narrowed completion: the repository still does not claim to parse undocumented TACO, official SEN2Vénus archive, or Bhoonidhi formats without verified product fixtures. T23 is DONE (narrowed). `next_agent: astrasr` — T24 (mandatory mask-aware processing) is the next eligible task.
+
+
+**astrasr — T24 (mandatory mask-aware processing) — DONE (narrowed)**
+
+Added mask propagation to the primary paired-data paths without inventing a sensor-specific cloud/QA format. Provenance manifests can now seal optional lr_mask_path / hr_mask_path files; SEN2NAIP and SEN2Vénus align and intersect those masks and return valid_mask for the existing T9 loss/training path. normalize_bands() now accepts a validity mask, computes percentile/z-score statistics only over valid pixels, zeroes invalid normalized pixels, and still fails closed on non-finite valid pixels. Metrics' spatial-alignment NCC now excludes invalid pixels. Inference accepts an optional --valid-mask HxW .npy, zeroes invalid inputs before model execution, and zeroes invalid SR/uncertainty outputs after scale expansion. Added tests/test_mask_aware.py covering masked normalization, manifest-backed SEN2NAIP propagation, inference normalization, and masked metrics.
+
+The existing SRLoss and training loop already accepted and propagated valid_mask, so no duplicate loss API was added.
+
+Verification: implementation and regression test files were committed, but this turn did not have a local PyTorch execution environment. The new tests should be run by the laptop/PyTorch agent, especially the manifest-backed SEN2NAIP case. next_agent: agent4 — T25 is now the next eligible top-to-bottom P0 task.
