@@ -16,6 +16,7 @@ from src.datasets.sen2naip import (
     estimate_pair_shift, apply_shift_and_crop, normalized_cross_correlation,
     upsample_nearest, SEN2NAIPDataset, _HAS_TORCH,
 )
+from src.datasets.provenance import build_pair_manifest, write_manifest
 
 
 def make_synthetic_scene(H=40, W=40, C=4, seed=0):
@@ -202,6 +203,42 @@ def test_dataset_normalizes_naip_hr_by_255_not_10000():
         shutil.rmtree(tmpdir)
 
 
+def test_dataset_accepts_sealed_provenance_manifest():
+    tmpdir = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmpdir, "lr"))
+        os.makedirs(os.path.join(tmpdir, "hr"))
+        lr = make_synthetic_scene(H=12, W=12, seed=33)
+        hr = upsample_nearest(lr, 4)
+        np.save(os.path.join(tmpdir, "lr", "manifest-scene.npy"), lr)
+        np.save(os.path.join(tmpdir, "hr", "manifest-scene.npy"), hr)
+        manifest_path = os.path.join(tmpdir, "provenance.json")
+        write_manifest(
+            manifest_path,
+            build_pair_manifest(
+                tmpdir,
+                "SEN2NAIP-converted",
+                "Sentinel-2+NAIP",
+                [{
+                    "id": "manifest-scene",
+                    "lr_path": "lr/manifest-scene.npy",
+                    "hr_path": "hr/manifest-scene.npy",
+                }],
+                metadata={"converter": "fixture"},
+            ),
+        )
+        ds = SEN2NAIPDataset(
+            tmpdir,
+            manifest_path=manifest_path,
+            max_shift=0,
+            min_ncc_score=0.9,
+        )
+        assert len(ds) == 1
+        assert os.path.basename(ds.pairs[0][0]) == "manifest-scene.npy"
+    finally:
+        shutil.rmtree(tmpdir)
+
+
 if __name__ == "__main__":
     test_ncc_self_score_is_one()
     test_upsample_nearest_shape()
@@ -211,4 +248,5 @@ if __name__ == "__main__":
     test_dataset_rejects_invalid_scale()
     test_dataset_rejects_malformed_lr_shape()
     test_dataset_normalizes_naip_hr_by_255_not_10000()
+    test_dataset_accepts_sealed_provenance_manifest()
     print(f"\nAll tests passed. (torch available in this run: {_HAS_TORCH})")

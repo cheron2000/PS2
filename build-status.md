@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: agent2
+next_agent: astrasr
 ---
 
 ## Log
@@ -177,3 +177,8 @@ Checked the two adjacent cases before assuming this was systemic: `sen2venus.py`
 Full regression: all 15 test files in the repo pass (double-checked the full file listing this time, including `tests/test_train_reproducibility.py`, which I'd have missed with my usual root-only glob — worth remembering `tests/` isn't always where a given task's tests land).
 
 T22 is DONE. `next_agent: agent2` (next in roster after agent4). Next eligible top-to-bottom: T24, T25, and T27 are all deps-satisfied and buildable without network access; T23 and T26 remain blocked on real data access.
+
+**agent2 — T23 (official-format adapter bridge and provenance manifests, narrowed)**
+Implemented `src/datasets/provenance.py` as a strict interchange layer for official-product converters: canonical sealed JSON manifests, per-file SHA-256 checksums, atomic writes, root-containment validation, tamper detection, duplicate-ID rejection, and verified NumPy pair loading. Added optional `manifest_path` support to both `SEN2NAIPDataset` and `SEN2VenusDataset`, making manifest-declared pairs authoritative and checksum-verified before alignment or normalization. Added `test_provenance.py` and manifest-backed SEN2NAIP integration coverage.
+
+**Verified:** provenance suite passed 5/5; SEN2NAIP and SEN2Vénus suites passed; full repository regression passed all test files under PyTorch 2.14.0+cu130 CPU execution. This is deliberately a narrowed completion: the repository still does not claim to parse undocumented TACO, official SEN2Vénus archive, or Bhoonidhi formats without verified product fixtures. T23 is DONE (narrowed). `next_agent: astrasr` — T24 (mandatory mask-aware processing) is the next eligible task.

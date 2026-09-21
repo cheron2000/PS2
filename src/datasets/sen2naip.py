@@ -56,6 +56,7 @@ except Exception:
 
 from src.preprocessing import normalize_bands
 from src.datasets.band_schema import validate_bands, SENTINEL2_L2A_4BAND, NAIP_4BAND, BandSchemaError
+from src.datasets.provenance import read_manifest
 
 SCALE_FACTOR = 4  # 10m Sentinel-2 -> 2.5m NAIP, SEN2NAIP's real cross-sensor task
 
@@ -150,6 +151,9 @@ class SEN2NAIPDataset(_DatasetBase):
 
     Args:
         root: directory containing lr/ and hr/ subfolders of matching .npy files
+        manifest_path: optional sealed provenance manifest. When provided, its
+            declared pairs are authoritative and every source file is checksum
+            verified before dataset construction.
         scale: LR->HR scale factor (default 4, matching SEN2NAIP's real subset)
         normalize_method: passed through to preprocessing.normalize_bands (T4)
         max_shift: search radius (HR pixels) for co-registration
@@ -159,7 +163,7 @@ class SEN2NAIPDataset(_DatasetBase):
 
     def __init__(self, root: str, scale: int = SCALE_FACTOR,
                  normalize_method: str = "reflectance", max_shift: int = 4,
-                 min_ncc_score: float = 0.1):
+                 min_ncc_score: float = 0.1, manifest_path: str | None = None):
         self.root = root
         if isinstance(scale, bool) or not isinstance(scale, (int, np.integer)) or scale <= 0:
             raise ValueError(f"scale must be a positive integer, got {scale!r}")
@@ -168,8 +172,31 @@ class SEN2NAIPDataset(_DatasetBase):
         self.max_shift = max_shift
         self.min_ncc_score = min_ncc_score
 
-        lr_files = sorted(glob.glob(os.path.join(root, "lr", "*.npy")))
-        if not lr_files:
+        manifest_pairs = None
+        if manifest_path is not None:
+            manifest = read_manifest(manifest_path, verify_files=True)
+            root = os.path.dirname(os.path.abspath(manifest_path))
+            manifest_pairs = []
+            for pair in manifest["pairs"]:
+                if not isinstance(pair, dict) or not pair.get("id"):
+                    raise ValueError("each provenance manifest pair needs a non-empty id")
+                if "lr_path" not in pair or "hr_path" not in pair:
+                    raise ValueError(f"manifest pair {pair.get('id')!r} needs lr_path and hr_path")
+                manifest_pairs.append(
+                    (
+                        str(pair["id"]),
+                        os.path.join(root, pair["lr_path"]),
+                        os.path.join(root, pair["hr_path"]),
+                    )
+                )
+        else:
+            lr_files = sorted(glob.glob(os.path.join(root, "lr", "*.npy")))
+            manifest_pairs = [
+                (os.path.splitext(os.path.basename(path))[0], path,
+                 os.path.join(root, "hr", os.path.splitext(os.path.basename(path))[0] + ".npy"))
+                for path in lr_files
+            ]
+        if not manifest_pairs:
             raise FileNotFoundError(
                 f"no .npy files found under {os.path.join(root, 'lr')} — see this "
                 f"file's module docstring for the expected on-disk layout"
@@ -178,9 +205,7 @@ class SEN2NAIPDataset(_DatasetBase):
         self.pairs = []       # list of (lr_path, hr_path, dy, dx, ncc_score)
         self.dropped_pairs = []  # list of (id, reason) for pairs excluded at load time
 
-        for lr_path in lr_files:
-            file_id = os.path.splitext(os.path.basename(lr_path))[0]
-            hr_path = os.path.join(root, "hr", file_id + ".npy")
+        for file_id, lr_path, hr_path in manifest_pairs:
             if not os.path.exists(hr_path):
                 self.dropped_pairs.append((file_id, "no matching HR file"))
                 continue

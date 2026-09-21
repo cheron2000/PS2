@@ -38,6 +38,7 @@ from src.datasets.sen2naip import (
     estimate_pair_shift,
     apply_shift_and_crop,
 )
+from src.datasets.provenance import read_manifest
 
 SCALE_FACTOR = 2  # 10 m Sentinel-2 -> 5 m SEN2Vénus validation target
 
@@ -51,11 +52,13 @@ class SEN2VenusDataset(_DatasetBase):
         normalize_method: method passed to ``normalize_bands``.
         max_shift: HR-pixel radius for integer NCC co-registration search.
         min_ncc_score: pairs below this score are excluded from the dataset.
+        manifest_path: optional sealed provenance manifest whose declared pairs
+            replace glob discovery and are checksum-verified before loading.
     """
 
     def __init__(self, root: str, scale: int = SCALE_FACTOR,
                  normalize_method: str = "reflectance", max_shift: int = 4,
-                 min_ncc_score: float = 0.1):
+                 min_ncc_score: float = 0.1, manifest_path: str | None = None):
         if scale < 1 or int(scale) != scale:
             raise ValueError(f"scale must be a positive integer, got {scale}")
         self.root = root
@@ -64,8 +67,25 @@ class SEN2VenusDataset(_DatasetBase):
         self.max_shift = max_shift
         self.min_ncc_score = min_ncc_score
 
-        lr_files = sorted(glob.glob(os.path.join(root, "lr", "*.npy")))
-        if not lr_files:
+        if manifest_path is not None:
+            manifest = read_manifest(manifest_path, verify_files=True)
+            root = os.path.dirname(os.path.abspath(manifest_path))
+            manifest_pairs = [
+                (
+                    str(pair["id"]),
+                    os.path.join(root, pair["lr_path"]),
+                    os.path.join(root, pair["hr_path"]),
+                )
+                for pair in manifest["pairs"]
+            ]
+        else:
+            lr_files = sorted(glob.glob(os.path.join(root, "lr", "*.npy")))
+            manifest_pairs = [
+                (os.path.splitext(os.path.basename(path))[0], path,
+                 os.path.join(root, "hr", os.path.splitext(os.path.basename(path))[0] + ".npy"))
+                for path in lr_files
+            ]
+        if not manifest_pairs:
             raise FileNotFoundError(
                 f"no .npy files found under {os.path.join(root, 'lr')} — "
                 "expected the documented lr/<id>.npy, hr/<id>.npy layout"
@@ -73,9 +93,7 @@ class SEN2VenusDataset(_DatasetBase):
 
         self.pairs = []
         self.dropped_pairs = []
-        for lr_path in lr_files:
-            file_id = os.path.splitext(os.path.basename(lr_path))[0]
-            hr_path = os.path.join(root, "hr", file_id + ".npy")
+        for file_id, lr_path, hr_path in manifest_pairs:
             if not os.path.exists(hr_path):
                 self.dropped_pairs.append((file_id, "no matching HR file"))
                 continue
