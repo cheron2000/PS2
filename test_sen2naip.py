@@ -104,7 +104,7 @@ def test_dataset_end_to_end_with_synthetic_files():
         ds = SEN2NAIPDataset(tmpdir, scale=scale, max_shift=6, min_ncc_score=0.3)
 
         assert len(ds) == 1, f"expected exactly 1 kept pair, got {len(ds)}; dropped={ds.dropped_pairs}"
-        kept_id = os.path.splitext(os.path.basename(ds.pairs[0][0]))[0]
+        kept_id = os.path.splitext(os.path.basename(ds.pairs[0]["lr_path"]))[0]
         assert kept_id == "pair0", f"expected pair0 to be kept, got {kept_id}"
 
         dropped_ids = {d[0] for d in ds.dropped_pairs}
@@ -234,7 +234,208 @@ def test_dataset_accepts_sealed_provenance_manifest():
             min_ncc_score=0.9,
         )
         assert len(ds) == 1
-        assert os.path.basename(ds.pairs[0][0]) == "manifest-scene.npy"
+        assert os.path.basename(ds.pairs[0]["lr_path"]) == "manifest-scene.npy"
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def _grid_pair(width, height, scale, origin=(500000, 300000), crs="EPSG:32643"):
+    """Matching T16's own test convention (test_t16_pairing.py's grid_pair()):
+    LR at 10m, HR at 10/scale m, same CRS and origin, scale-aligned pixel size."""
+    ox, oy = origin
+    lr_grid = {"crs": crs, "transform": [10, 0, ox, 0, -10, oy], "width": width, "height": height}
+    hr_grid = {"crs": crs, "transform": [10 / scale, 0, ox, 0, -10 / scale, oy],
+               "width": width * scale, "height": height * scale}
+    return lr_grid, hr_grid
+
+
+def test_grid_aware_pair_accepted_with_valid_scale_aligned_grids():
+    """T25: a perfectly-aligned pair with valid CRS/grid metadata should be
+    accepted via the grid-aware path, and the returned sample should carry
+    lr_grid/hr_grid (cropped/translated, not just echoed back verbatim)."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmpdir, "lr"))
+        os.makedirs(os.path.join(tmpdir, "hr"))
+        lr = make_synthetic_scene(H=12, W=12, seed=40)
+        hr = upsample_nearest(lr, 4)
+        np.save(os.path.join(tmpdir, "lr", "grid-scene.npy"), lr)
+        np.save(os.path.join(tmpdir, "hr", "grid-scene.npy"), hr)
+
+        lr_grid, hr_grid = _grid_pair(12, 12, scale=4)
+        manifest_path = os.path.join(tmpdir, "provenance.json")
+        write_manifest(
+            manifest_path,
+            build_pair_manifest(
+                tmpdir, "SEN2NAIP-converted", "Sentinel-2+NAIP",
+                [{
+                    "id": "grid-scene", "lr_path": "lr/grid-scene.npy", "hr_path": "hr/grid-scene.npy",
+                    "metadata": {"lr_grid": lr_grid, "hr_grid": hr_grid},
+                }],
+            ),
+        )
+
+        ds = SEN2NAIPDataset(tmpdir, manifest_path=manifest_path, max_shift=0, min_ncc_score=0.9)
+        assert len(ds) == 1, f"expected the grid-valid pair to be kept, dropped={ds.dropped_pairs}"
+        sample = ds[0]
+        assert "lr_grid" in sample and "hr_grid" in sample, "grid-aware pairs should return grid metadata in the sample"
+        assert sample["lr_grid"]["crs"] == "EPSG:32643"
+        assert sample["hr_grid"]["width"] == sample["lr_grid"]["width"] * 4
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_grid_aware_pair_rejects_crs_mismatch():
+    """T25 acceptance criterion: differing CRS must be rejected, not silently
+    paired as if the grids matched."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmpdir, "lr"))
+        os.makedirs(os.path.join(tmpdir, "hr"))
+        lr = make_synthetic_scene(H=12, W=12, seed=41)
+        hr = upsample_nearest(lr, 4)
+        np.save(os.path.join(tmpdir, "lr", "crs-mismatch.npy"), lr)
+        np.save(os.path.join(tmpdir, "hr", "crs-mismatch.npy"), hr)
+
+        lr_grid, hr_grid = _grid_pair(12, 12, scale=4)
+        hr_grid["crs"] = "EPSG:4326"  # deliberately different from lr_grid's EPSG:32643
+        manifest_path = os.path.join(tmpdir, "provenance.json")
+        write_manifest(
+            manifest_path,
+            build_pair_manifest(
+                tmpdir, "SEN2NAIP-converted", "Sentinel-2+NAIP",
+                [{
+                    "id": "crs-mismatch", "lr_path": "lr/crs-mismatch.npy", "hr_path": "hr/crs-mismatch.npy",
+                    "metadata": {"lr_grid": lr_grid, "hr_grid": hr_grid},
+                }],
+            ),
+        )
+
+        ds = SEN2NAIPDataset(tmpdir, manifest_path=manifest_path, max_shift=0, min_ncc_score=0.9)
+        assert len(ds) == 0, f"expected the CRS-mismatched pair to be dropped, kept={len(ds)}"
+        assert ds.dropped_pairs[0][0] == "crs-mismatch"
+        assert "grid contract violation" in ds.dropped_pairs[0][1]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_grid_aware_pair_rejects_non_scale_aligned_shift():
+    """T25's actual point: this is the specific bug the Wide Research report
+    named for this file — a registration shift that isn't an exact multiple
+    of the scale factor used to be silently floor-divided (a real phase
+    error), and must now be REJECTED instead when grid metadata declares
+    the pairing should be exact."""
+    scale = 4
+    tmpdir = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmpdir, "lr"))
+        os.makedirs(os.path.join(tmpdir, "hr"))
+        lr = make_synthetic_scene(H=20, W=20, seed=2)  # same fixture as
+        hr_full = upsample_nearest(lr, scale)           # test_estimate_pair_shift_recovers_known_shift,
+        true_dy, true_dx = 3, -2                          # which proves this recovers shift (-3, 2) —
+        C, H, W = hr_full.shape                            # neither -3 nor 2 is a multiple of scale=4.
+        pad = 8
+        hr_padded = np.pad(hr_full, ((0, 0), (pad, pad), (pad, pad)), mode="reflect")
+        hr_shifted = hr_padded[:, pad + true_dy: pad + true_dy + H, pad + true_dx: pad + true_dx + W]
+
+        np.save(os.path.join(tmpdir, "lr", "phase-mismatch.npy"), lr)
+        np.save(os.path.join(tmpdir, "hr", "phase-mismatch.npy"), hr_shifted)
+
+        lr_grid, hr_grid = _grid_pair(20, 20, scale=scale)
+        manifest_path = os.path.join(tmpdir, "provenance.json")
+        write_manifest(
+            manifest_path,
+            build_pair_manifest(
+                tmpdir, "SEN2NAIP-converted", "Sentinel-2+NAIP",
+                [{
+                    "id": "phase-mismatch", "lr_path": "lr/phase-mismatch.npy", "hr_path": "hr/phase-mismatch.npy",
+                    "metadata": {"lr_grid": lr_grid, "hr_grid": hr_grid},
+                }],
+            ),
+        )
+
+        ds = SEN2NAIPDataset(tmpdir, manifest_path=manifest_path, max_shift=6, min_ncc_score=0.3)
+        assert len(ds) == 0, f"expected the non-scale-aligned-shift pair to be rejected, kept={len(ds)}"
+        assert ds.dropped_pairs[0][0] == "phase-mismatch"
+        assert "grid contract violation" in ds.dropped_pairs[0][1]
+
+        # Confirm the SAME pair, WITHOUT grid metadata, is accepted as before —
+        # proving this is genuinely opt-in stricter behavior, not a regression
+        # in the shape-only fallback path.
+        manifest_path_no_grid = os.path.join(tmpdir, "provenance-no-grid.json")
+        write_manifest(
+            manifest_path_no_grid,
+            build_pair_manifest(
+                tmpdir, "SEN2NAIP-converted", "Sentinel-2+NAIP",
+                [{"id": "phase-mismatch", "lr_path": "lr/phase-mismatch.npy", "hr_path": "hr/phase-mismatch.npy"}],
+            ),
+        )
+        ds_no_grid = SEN2NAIPDataset(tmpdir, manifest_path=manifest_path_no_grid, max_shift=6, min_ncc_score=0.3)
+        assert len(ds_no_grid) == 1, "the same pair without grid metadata should still be accepted via the shape-only fallback"
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_grid_aware_pair_rejects_dimension_mismatch():
+    """Grid metadata whose declared width/height don't match the actual
+    array shape must be rejected, not silently trusted."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmpdir, "lr"))
+        os.makedirs(os.path.join(tmpdir, "hr"))
+        lr = make_synthetic_scene(H=12, W=12, seed=42)
+        hr = upsample_nearest(lr, 4)
+        np.save(os.path.join(tmpdir, "lr", "dim-mismatch.npy"), lr)
+        np.save(os.path.join(tmpdir, "hr", "dim-mismatch.npy"), hr)
+
+        lr_grid, hr_grid = _grid_pair(999, 999, scale=4)  # deliberately wrong dims
+        manifest_path = os.path.join(tmpdir, "provenance.json")
+        write_manifest(
+            manifest_path,
+            build_pair_manifest(
+                tmpdir, "SEN2NAIP-converted", "Sentinel-2+NAIP",
+                [{
+                    "id": "dim-mismatch", "lr_path": "lr/dim-mismatch.npy", "hr_path": "hr/dim-mismatch.npy",
+                    "metadata": {"lr_grid": lr_grid, "hr_grid": hr_grid},
+                }],
+            ),
+        )
+
+        ds = SEN2NAIPDataset(tmpdir, manifest_path=manifest_path, max_shift=0, min_ncc_score=0.9)
+        assert len(ds) == 0, f"expected the dimension-mismatched pair to be dropped, kept={len(ds)}"
+        assert "grid contract violation" in ds.dropped_pairs[0][1]
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_grid_aware_pair_requires_both_grids_present():
+    """Only one of lr_grid/hr_grid present (not both) should be rejected as
+    an incomplete/inconsistent contract, not silently treated as 'no grid info'."""
+    tmpdir = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmpdir, "lr"))
+        os.makedirs(os.path.join(tmpdir, "hr"))
+        lr = make_synthetic_scene(H=12, W=12, seed=43)
+        hr = upsample_nearest(lr, 4)
+        np.save(os.path.join(tmpdir, "lr", "half-grid.npy"), lr)
+        np.save(os.path.join(tmpdir, "hr", "half-grid.npy"), hr)
+
+        lr_grid, _hr_grid = _grid_pair(12, 12, scale=4)
+        manifest_path = os.path.join(tmpdir, "provenance.json")
+        write_manifest(
+            manifest_path,
+            build_pair_manifest(
+                tmpdir, "SEN2NAIP-converted", "Sentinel-2+NAIP",
+                [{
+                    "id": "half-grid", "lr_path": "lr/half-grid.npy", "hr_path": "hr/half-grid.npy",
+                    "metadata": {"lr_grid": lr_grid},  # hr_grid deliberately omitted
+                }],
+            ),
+        )
+
+        ds = SEN2NAIPDataset(tmpdir, manifest_path=manifest_path, max_shift=0, min_ncc_score=0.9)
+        assert len(ds) == 0, f"expected the half-declared-grid pair to be dropped, kept={len(ds)}"
+        assert "both lr_grid and hr_grid" in ds.dropped_pairs[0][1]
     finally:
         shutil.rmtree(tmpdir)
 
@@ -249,4 +450,9 @@ if __name__ == "__main__":
     test_dataset_rejects_malformed_lr_shape()
     test_dataset_normalizes_naip_hr_by_255_not_10000()
     test_dataset_accepts_sealed_provenance_manifest()
+    test_grid_aware_pair_accepted_with_valid_scale_aligned_grids()
+    test_grid_aware_pair_rejects_crs_mismatch()
+    test_grid_aware_pair_rejects_non_scale_aligned_shift()
+    test_grid_aware_pair_rejects_dimension_mismatch()
+    test_grid_aware_pair_requires_both_grids_present()
     print(f"\nAll tests passed. (torch available in this run: {_HAS_TORCH})")

@@ -203,6 +203,18 @@ def read_manifest(
                 raise ProvenanceError("each manifest pair must be an object with a string id")
             for role in ("lr_path", "hr_path", "lr_mask_path", "hr_mask_path"):
                 rel = pair.get(role)
+                # BUG FIX (2026-09-21, agent4, T25 turn): mask-path roles are
+                # optional by design (build_pair_manifest's write side already
+                # treats them this way — it skips them entirely when absent).
+                # This read-side check did NOT make the same exception, so
+                # `rel is None` for an intentionally-absent mask path was
+                # rejected as "undeclared or unsafe" — meaning ANY manifest
+                # without masks (the common case, and the only case any
+                # existing test or caller actually produced) was completely
+                # unreadable via read_manifest(..., verify_files=True).
+                # Confirmed by direct reproduction before fixing, not assumed.
+                if role.endswith("_mask_path") and rel is None:
+                    continue
                 if (
                     not isinstance(rel, str)
                     or Path(rel).is_absolute()

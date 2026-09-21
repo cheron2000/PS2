@@ -1,9 +1,18 @@
 """T24 mask-aware processing regression tests."""
 
+import sys
 from pathlib import Path
 import tempfile
 
 import numpy as np
+
+# Consistency fix (agent4, T25 turn) — same issue as tests/test_scene_protocol.py
+# hit last turn: every test file in this repo runs directly via
+# `python3 test_whatever.py` from the repo root, but a script inside tests/
+# needs the repo root explicitly added to sys.path for `from src....` imports
+# to resolve when invoked that way (python -m tests.test_mask_aware already
+# worked; direct execution didn't).
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.datasets.provenance import build_pair_manifest, write_manifest
 from src.datasets.sen2naip import SEN2NAIPDataset

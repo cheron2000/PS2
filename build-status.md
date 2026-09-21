@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: agent4
+next_agent: agent2
 ---
 
 ## Log
@@ -191,3 +191,24 @@ Added mask propagation to the primary paired-data paths without inventing a sens
 The existing SRLoss and training loop already accepted and propagated valid_mask, so no duplicate loss API was added.
 
 Verification: implementation and regression test files were committed, but this turn did not have a local PyTorch execution environment. The new tests should be run by the laptop/PyTorch agent, especially the manifest-backed SEN2NAIP case. next_agent: agent4 — T25 is now the next eligible top-to-bottom P0 task.
+
+**agent4 — T25 (grid-aware pairing for the primary SEN2NAIP path, narrowed) — including exactly the verification astrasr flagged as needed**
+
+Picked up T25, and specifically ran the manifest-backed SEN2NAIP case astrasr's T24 turn had flagged as needing a PyTorch-enabled environment to verify. It didn't just need verifying — it was completely broken, in two independent ways, both confirmed by direct reproduction before fixing (not assumed from reading code):
+
+1. **`provenance.py`'s `read_manifest(verify_files=True)` rejected any manifest without masks.** The write side (`build_pair_manifest`) correctly treats `lr_mask_path`/`hr_mask_path` as optional. The read side's verification loop didn't make the same exception — `pair.get(role)` returning `None` for an absent optional mask path was treated as "undeclared or unsafe" and rejected. This meant every manifest ever actually producible by the documented API (i.e., every manifest without masks, which is all of them so far) was unreadable. Fixed to skip absent `_mask_path` roles, matching the write side.
+2. **`sen2naip.py`'s manifest branch built 3-element tuples, but the loop unpacked 5.** A live crash for the actual point of T23's feature — using `manifest_path=`. Never caught because no test had exercised this path start-to-finish before now (the one test that used `manifest_path` was itself failing on bug #1 first, so it never even reached this second bug).
+
+Fixed both, then did the actual T25 work: wired T16's `geospatial.py` (CRS/affine grid contracts, proven on Cartosat) into `sen2naip.py`'s manifest-loading path, mirroring `cartosat_pairing.py`'s established pattern closely. Pairs with `lr_grid`/`hr_grid` metadata now get the grid contract validated and a non-scale-aligned registration shift is *rejected* via `require_scale_aligned_shift`, not floor-divided — the exact phase-mismatch risk the Wide Research report named specifically for this file. Along the way, caught a third issue in my own first draft before it shipped: I initially read `lr_grid`/`hr_grid` as top-level pair keys, but `build_pair_manifest` only preserves extra fields nested under `pair["metadata"]` — checked this against `build_pair_manifest`'s actual code and T16's own test convention before trusting my first instinct, and fixed it before writing any tests against the wrong assumption.
+
+Also switched `self.pairs` from positional tuples to dicts throughout this file. A 7-element positional tuple was already the kind of fragility that caused bug #2 above; T25 needed two more fields, and growing it to 9 would have been the same mistake again, not a fix.
+
+**5 new tests**, covering: valid scale-aligned grids accepted (with grid metadata correctly propagated in the output sample, not just echoed), CRS mismatch rejected, non-scale-aligned shift rejected (reusing the exact fixture from `test_estimate_pair_shift_recovers_known_shift`, which already proves the recovered shift (-3, 2) isn't a multiple of scale=4 — plus a same-pair-without-grid-metadata check proving the shape-only fallback is unaffected, not just "the new path works"), dimension mismatch rejected, and an incomplete grid declaration (only one of `lr_grid`/`hr_grid`) rejected. Each test was isolate-run individually and confirmed passing, not just trusted because the full suite didn't crash — a discipline this whole build phase has needed repeatedly.
+
+**Narrowed:** `sen2venus.py` shares T25's target (per the task description) but wasn't touched — checked its manifest branch first and confirmed it does NOT share the tuple-arity bug (T24 already built it correctly there), so wiring in grid-awareness should be a smaller, more contained lift than this turn's work. Spun out as **T28** rather than rushing it into this same turn.
+
+**Also fixed, found incidentally during the full regression sweep:** `tests/test_mask_aware.py` (T24) had the exact same direct-execution `sys.path` issue I fixed in `tests/test_scene_protocol.py` last turn — only worked via `python -m`, not `python3 tests/test_mask_aware.py` directly. Fixed the same way. Running it after the fix also served as an independent regression check that this turn's `sen2naip.py` rework didn't break T24's mask-aware functionality — it passed clean.
+
+Full regression: every test file in the repo passes, including `test_provenance.py`'s existing 5/5 (confirming the `read_manifest` fix didn't regress the manifest-tampering/rejection tests it's specifically designed to check).
+
+T25 is DONE (narrowed to `sen2naip.py`). `next_agent: agent2` (next in roster after agent4). Next eligible top-to-bottom: T27 (evaluation contract freeze, buildable now, no dependencies blocking it) and T28 (the sen2venus.py grid wiring just spun out) are both eligible; T26 remains blocked on T23's real-data access.
