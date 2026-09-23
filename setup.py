@@ -196,28 +196,14 @@ def install_requirements(repo_dir: Path, pip_exe: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def run_tests(repo_dir: Path, py_exe: Path) -> bool:
-    header("Verifying the install: running the test suite")
-    test_files = sorted(repo_dir.glob("test_*.py"))
-    if not test_files:
-        print("  No test_*.py files found — nothing to verify.")
-        return True
-
-    results = []
-    for test_file in test_files:
-        print(f"\n  --- {test_file.name} ---")
-        result = subprocess.run([str(py_exe), str(test_file)], cwd=repo_dir)
-        results.append((test_file.name, result.returncode == 0))
-
-    header("Test summary")
-    all_passed = True
-    for name, ok in results:
-        status = "PASS" if ok else "FAIL"
-        if not ok:
-            all_passed = False
-        print(f"  [{status}] {name}")
-
-    return all_passed
-
+    """Run the repository's canonical test runner, including nested tests."""
+    header("Verifying the install: running the canonical test suite")
+    runner = repo_dir / "run_tests.py"
+    if not runner.exists():
+        print(f"  [FAIL] {runner} not found.")
+        return False
+    result = subprocess.run([str(py_exe), str(runner)], cwd=repo_dir)
+    return result.returncode == 0
 
 # ---------------------------------------------------------------------------
 
