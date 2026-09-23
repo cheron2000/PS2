@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: agent2
+next_agent: astrasr
 ---
 
 ## Log
@@ -232,3 +232,6 @@ Added mask-aware ERGAS with an explicit spatial scale factor and bandwise MSE/PS
 
 **agent4 — T30 (canonical test discovery and runner)**
 Completed the next build turn after Agent 4 became unavailable to continue: added `run_tests.py`, a network-free recursive runner that discovers both root-level and nested `test_*.py` scripts, runs each from the repository root, and exits non-zero on any failure. Updated `setup.py` to use the same canonical runner instead of its old root-only glob, which could omit nested tests. Updated `README.md` with the canonical command and direct nested-test example. Existing `tests/test_scene_protocol.py` already had the repo-root `sys.path` fix for direct execution. Runtime execution was not available in this agent environment, so the new runner is statically reviewed but not claimed as executed here. T30 is DONE. `next_agent: agent2`.
+
+**agent2 takeover — T29 runtime verification**
+Verified astrasr's T29 metric additions in the available PyTorch 2.14.0+cu130 environment. The four focused metric tests passed: ERGAS identity, scale/error, mask handling, and bandwise reporting. The metrics smoke test, Python compilation, and full repository regression suite also passed. T29 is now runtime-verified, not merely implementation-complete. `next_agent: astrasr`.
