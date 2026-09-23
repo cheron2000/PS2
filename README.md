@@ -46,33 +46,34 @@ src/
     cartosat_pairing.py         Cartosat<->Sentinel-2 pairing for India validation (T10)
     worldcover.py               Real ESA WorldCover land-cover loader (T13)
 
-test_*.py                     One test file per module above, same naming pattern.
-                               Plain scripts (not pytest-only) -- see "Running tests" below.
+test_*.py / tests/test_*.py  Executable regression scripts. `run_tests.py` discovers
+                               both root-level and nested tests without pytest.
 
-tasks.md                      Full task board (all T1-T13 currently DONE except this one, T12)
+tasks.md                      Full task board and build history
 ```
 
 ---
 
 ## Running tests
 
-Every module has a matching `test_*.py`. They're plain runnable scripts (not
-pytest-only, though pytest can also discover them):
+Tests are executable Python scripts, not pytest-only. The canonical command
+discovers both root-level and nested `tests/` scripts and returns a non-zero exit
+code if any test fails:
 
 ```bash
-python3 test_preprocessing.py       # 14/14, pure numpy, no data needed
-python3 test_sen2naip.py            # 5/5, synthetic data generated on the fly
-python3 test_sen2venus.py
-python3 test_cartosat_pairing.py
-python3 test_worldcover.py          # includes a real GeoTIFF round-trip (needs rasterio)
-python3 test_eval_downstream.py     # 12/12
-python3 test_train.py               # synthetic end-to-end training run
-python3 test_infer.py               # synthetic checkpoint -> GeoTIFF pipeline
-python3 test_model_runtime.py       # real PyTorch execution of src/model.py
-
-# or, to run everything:
-for f in test_*.py; do python3 "$f" || echo "FAILED: $f"; done
+python3 run_tests.py
 ```
+
+To run one specific test directly:
+
+```bash
+python3 test_preprocessing.py
+python3 tests/test_scene_protocol.py
+```
+
+The setup script uses the same `run_tests.py` runner, so setup verification and
+manual verification exercise the same test inventory. This avoids the previous
+failure mode where a nested test could be silently omitted by a root-only glob.
 
 All of these generate their own synthetic data — **none require real Sentinel-2,
 NAIP, Cartosat, or WorldCover downloads**. That's deliberate: every data-access
