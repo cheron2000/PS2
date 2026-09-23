@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from src.losses import SRLoss
 from src.model import SRModel
 from src.datasets.sen2naip import SEN2NAIPDataset
+from src.telemetry import EventLogger
 
 
 def _rng_state() -> Dict:
@@ -302,8 +303,11 @@ def main() -> None:
              "training-loss-based selection explicitly, rather than by omission.",
     )
     parser.add_argument("--resume", default=None, help="checkpoint to resume from")
+    parser.add_argument("--telemetry", default=None, help="optional JSONL telemetry path")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
+    telemetry = EventLogger(args.telemetry)
+    telemetry.start(mode="train", data_root=args.data_root, device=args.device, seed=args.seed)
 
     set_seed(args.seed)
     device = torch.device(args.device)
@@ -335,20 +339,17 @@ def main() -> None:
         print("WARNING: --val-fraction 0 -- best-checkpoint selection will use "
               "TRAINING loss, not validation loss. Only do this deliberately.")
 
-    fit(
-        model,
-        train_loader,
-        criterion,
-        optimizer,
-        args.epochs,
-        device,
-        val_loader=val_loader,
-        checkpoint_dir=args.checkpoint_dir,
-        start_epoch=start_epoch,
-        model_config=model_config,
-        run_config=run_config,
-        dataset_fingerprint=fingerprint,
-    )
+    try:
+        history = fit(
+            model, train_loader, criterion, optimizer, args.epochs, device,
+            val_loader=val_loader, checkpoint_dir=args.checkpoint_dir,
+            start_epoch=start_epoch, model_config=model_config,
+            run_config=run_config, dataset_fingerprint=fingerprint,
+        )
+        telemetry.finish(mode="train", epochs_completed=len(history), checkpoint_dir=args.checkpoint_dir)
+    except Exception as exc:
+        telemetry.error(exc, mode="train")
+        raise
 
 
 if __name__ == "__main__":
