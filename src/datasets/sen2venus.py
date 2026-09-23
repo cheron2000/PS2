@@ -39,6 +39,7 @@ from src.datasets.sen2naip import (
     apply_shift_and_crop,
 )
 from src.datasets.provenance import read_manifest
+from src.datasets.geospatial import GridSpec, GridContractError, validate_grid_pair, require_scale_aligned_shift, crop_pair_with_grids
 
 SCALE_FACTOR = 2  # 10 m Sentinel-2 -> 5 m SEN2Vénus validation target
 
@@ -70,21 +71,23 @@ class SEN2VenusDataset(_DatasetBase):
         if manifest_path is not None:
             manifest = read_manifest(manifest_path, verify_files=True)
             root = os.path.dirname(os.path.abspath(manifest_path))
-            manifest_pairs = [
-                (
-                    str(pair["id"]),
-                    os.path.join(root, pair["lr_path"]),
-                    os.path.join(root, pair["hr_path"]),
-                    os.path.join(root, pair["lr_mask_path"]) if pair.get("lr_mask_path") else None,
-                    os.path.join(root, pair["hr_mask_path"]) if pair.get("hr_mask_path") else None,
-                )
-                for pair in manifest["pairs"]
-            ]
+            manifest_pairs = []
+            for pair in manifest["pairs"]:
+                metadata = pair.get("metadata") or {}
+                manifest_pairs.append({
+                    "id": str(pair["id"]),
+                    "lr_path": os.path.join(root, pair["lr_path"]),
+                    "hr_path": os.path.join(root, pair["hr_path"]),
+                    "lr_mask_path": os.path.join(root, pair["lr_mask_path"]) if pair.get("lr_mask_path") else None,
+                    "hr_mask_path": os.path.join(root, pair["hr_mask_path"]) if pair.get("hr_mask_path") else None,
+                    "lr_grid": metadata.get("lr_grid"), "hr_grid": metadata.get("hr_grid"),
+                })
         else:
             lr_files = sorted(glob.glob(os.path.join(root, "lr", "*.npy")))
             manifest_pairs = [
-                (os.path.splitext(os.path.basename(path))[0], path,
-                 os.path.join(root, "hr", os.path.splitext(os.path.basename(path))[0] + ".npy"), None, None)
+                {"id": os.path.splitext(os.path.basename(path))[0], "lr_path": path,
+                 "hr_path": os.path.join(root, "hr", os.path.splitext(os.path.basename(path))[0] + ".npy"),
+                 "lr_mask_path": None, "hr_mask_path": None, "lr_grid": None, "hr_grid": None}
                 for path in lr_files
             ]
         if not manifest_pairs:
@@ -95,7 +98,10 @@ class SEN2VenusDataset(_DatasetBase):
 
         self.pairs = []
         self.dropped_pairs = []
-        for file_id, lr_path, hr_path, lr_mask_path, hr_mask_path in manifest_pairs:
+        for entry in manifest_pairs:
+            file_id = entry["id"]
+            lr_path, hr_path = entry["lr_path"], entry["hr_path"]
+            lr_mask_path, hr_mask_path = entry["lr_mask_path"], entry["hr_mask_path"]
             if not os.path.exists(hr_path):
                 self.dropped_pairs.append((file_id, "no matching HR file"))
                 continue
@@ -120,18 +126,45 @@ class SEN2VenusDataset(_DatasetBase):
                     (file_id, f"NCC score {score:.3f} below threshold {self.min_ncc_score}")
                 )
                 continue
-            self.pairs.append((lr_path, hr_path, dy, dx, score, lr_mask_path, hr_mask_path))
+            lr_grid = hr_grid = None
+            if entry["lr_grid"] is not None or entry["hr_grid"] is not None:
+                if entry["lr_grid"] is None or entry["hr_grid"] is None:
+                    self.dropped_pairs.append((file_id, "both lr_grid and hr_grid metadata are required for CRS-aware pairing"))
+                    continue
+                try:
+                    lr_grid = GridSpec.from_mapping(entry["lr_grid"], name="lr_grid")
+                    hr_grid = GridSpec.from_mapping(entry["hr_grid"], name="hr_grid")
+                    if (lr_grid.height, lr_grid.width) != lr.shape[1:] or (hr_grid.height, hr_grid.width) != hr.shape[1:]:
+                        raise GridContractError("grid dimensions do not match the supplied arrays")
+                    validate_grid_pair(lr_grid, hr_grid, self.scale)
+                    require_scale_aligned_shift(dy, dx, self.scale)
+                except GridContractError as exc:
+                    self.dropped_pairs.append((file_id, f"grid contract violation: {exc}"))
+                    continue
+            self.pairs.append({
+                "lr_path": lr_path, "hr_path": hr_path, "dy": dy, "dx": dx, "score": score,
+                "lr_mask_path": lr_mask_path, "hr_mask_path": hr_mask_path,
+                "lr_grid": lr_grid, "hr_grid": hr_grid,
+            })
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
-        lr_path, hr_path, dy, dx, score, lr_mask_path, hr_mask_path = self.pairs[idx]
+        entry = self.pairs[idx]
+        lr_path, hr_path = entry["lr_path"], entry["hr_path"]
+        dy, dx, score = entry["dy"], entry["dx"], entry["score"]
+        lr_mask_path, hr_mask_path = entry["lr_mask_path"], entry["hr_mask_path"]
+        lr_grid, hr_grid = entry["lr_grid"], entry["hr_grid"]
         lr = np.load(lr_path)
         hr = np.load(hr_path)
-        lr_aligned, hr_aligned = apply_shift_and_crop(
-            lr, hr, dy, dx, scale=self.scale
-        )
+        if lr_grid is not None:
+            lr_aligned, hr_aligned, lr_grid_out, hr_grid_out = crop_pair_with_grids(
+                lr, hr, dy, dx, self.scale, lr_grid, hr_grid
+            )
+        else:
+            lr_aligned, hr_aligned = apply_shift_and_crop(lr, hr, dy, dx, scale=self.scale)
+            lr_grid_out = hr_grid_out = None
         lr_mask_aligned = None
         valid_mask = None
         if lr_mask_path or hr_mask_path:
@@ -139,11 +172,16 @@ class SEN2VenusDataset(_DatasetBase):
             hr_mask = np.ones(hr.shape[1:], dtype=bool) if hr_mask_path is None else np.asarray(np.load(hr_mask_path), dtype=bool)
             if lr_mask.shape != lr.shape[1:] or hr_mask.shape != hr.shape[1:]:
                 raise ValueError("LR/HR validity masks must match source spatial shapes")
-            lr_mask_aligned, hr_mask_aligned = apply_shift_and_crop(
-                lr_mask[None, ...].astype(np.float32),
-                hr_mask[None, ...].astype(np.float32),
-                dy, dx, scale=self.scale,
-            )
+            if lr_grid is not None:
+                lr_mask_aligned, hr_mask_aligned, _, _ = crop_pair_with_grids(
+                    lr_mask[None, ...].astype(np.float32), hr_mask[None, ...].astype(np.float32),
+                    dy, dx, self.scale, lr_grid, hr_grid
+                )
+            else:
+                lr_mask_aligned, hr_mask_aligned = apply_shift_and_crop(
+                    lr_mask[None, ...].astype(np.float32),
+                    hr_mask[None, ...].astype(np.float32), dy, dx, scale=self.scale,
+                )
             lr_mask_aligned = lr_mask_aligned[0].astype(bool)
             hr_mask_aligned = hr_mask_aligned[0].astype(bool)
             valid_mask = hr_mask_aligned & np.repeat(
@@ -165,6 +203,7 @@ class SEN2VenusDataset(_DatasetBase):
             "alignment_score": score,
             "scale": self.scale,
             **({"valid_mask": valid_mask} if valid_mask is not None else {}),
+            **({"lr_grid": lr_grid_out.to_dict(), "hr_grid": hr_grid_out.to_dict()} if lr_grid_out is not None else {}),
         }
         if _HAS_TORCH:
             sample["lr"] = torch.from_numpy(sample["lr"])
