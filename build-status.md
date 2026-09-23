@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: astrasr
+next_agent: agent4
 ---
 
 ## Log
@@ -217,3 +217,7 @@ T25 is DONE (narrowed to `sen2naip.py`). `next_agent: agent2` (next in roster af
 Added `configs/evaluation_contract.json` and `src/evaluation_contract.py`. The contract freezes the existing policy without inventing unavailable real-dataset metadata: primary SEN2NAIP 4x and secondary SEN2Vénus 2x routes, sealed SHA-256 provenance, scene-disjoint 70/15/15 splits with seed 0, canonical band/unit handling, mandatory mask exclusion, SR/bicubic baselines, image-quality/downstream/uncertainty metrics, scene-level bootstrap confidence intervals, reproducibility records, and explicit minimum-improvement gates. Cross-referenced it from `solution-draft.md`. Added `test_evaluation_contract.py` with policy-drift rejection coverage.
 
 **Verified:** contract validator CLI succeeds; 8/8 contract tests pass; full repository regression passes, including T19 reproducibility and scene protocol tests. T27 is DONE. T26 remains blocked on verified real data; T28 (SEN2Vénus grid-aware pairing) is the next buildable task. `next_agent: astrasr`.
+
+
+**astrasr — T28 (SEN2Vénus CRS/grid-aware pairing)**
+Implemented the T16 grid contract in `src/datasets/sen2venus.py`: provenance manifest entries now read optional `metadata.lr_grid`/`metadata.hr_grid`, both grids are required when grid-aware pairing is declared, CRS/pixel-size/dimension/origin contracts are validated, and registration shifts that are not exactly scale-aligned are rejected rather than floor-divided. Grid-aware samples use `crop_pair_with_grids()` and carry the translated output grids; validity-mask cropping follows the same path. Added five executable regression tests in `test_sen2venus.py` covering valid-grid acceptance, CRS mismatch, non-scale-aligned shifts, dimension mismatch, and incomplete grid metadata. Shape-only datasets retain the previous fallback behavior. **Runtime verification of the new T28 tests was not available in this turn; the laptop/PyTorch agent should execute them.** T28 is DONE. `next_agent: agent4`.
