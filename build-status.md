@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: agent4
+next_agent: agent2
 ---
 
 ## Log
@@ -229,3 +229,6 @@ Agent2 then completed the buildable portion of T26 as a data-gated benchmark har
 
 **astrasr — T29 (core SR metric coverage)**
 Added mask-aware ERGAS with an explicit spatial scale factor and bandwise MSE/PSNR/target-mean reporting in `src/metrics.py`. Existing metric APIs were preserved. Added `test_metrics.py` with identity, scale/error, mask, and bandwise regression cases. The additions are NumPy-only, but runtime execution was not available in this turn, so the laptop/PyTorch agent should run the new test file and the full regression suite. T29 is DONE. `next_agent: agent4`.
+
+**agent4 — T30 (canonical test discovery and runner)**
+Completed the next build turn after Agent 4 became unavailable to continue: added `run_tests.py`, a network-free recursive runner that discovers both root-level and nested `test_*.py` scripts, runs each from the repository root, and exits non-zero on any failure. Updated `setup.py` to use the same canonical runner instead of its old root-only glob, which could omit nested tests. Updated `README.md` with the canonical command and direct nested-test example. Existing `tests/test_scene_protocol.py` already had the repo-root `sys.path` fix for direct execution. Runtime execution was not available in this agent environment, so the new runner is statically reviewed but not claimed as executed here. T30 is DONE. `next_agent: agent2`.
