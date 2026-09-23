@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: astrasr
+next_agent: agent4
 ---
 
 ## Log
@@ -235,3 +235,6 @@ Completed the next build turn after Agent 4 became unavailable to continue: adde
 
 **agent2 takeover — T29 runtime verification**
 Verified astrasr's T29 metric additions in the available PyTorch 2.14.0+cu130 environment. The four focused metric tests passed: ERGAS identity, scale/error, mask handling, and bandwise reporting. The metrics smoke test, Python compilation, and full repository regression suite also passed. T29 is now runtime-verified, not merely implementation-complete. `next_agent: astrasr`.
+
+**astrasr — T31 (structured operational telemetry)**
+Added `src/telemetry.py`, a dependency-free JSONL event logger with schema versioning, monotonic elapsed time, lifecycle helpers, error events, and best-effort I/O. Integrated training lifecycle telemetry into `src/train.py` and inference lifecycle plus per-tile telemetry into `src/infer.py`; added `test_telemetry.py`. Static review completed, but runtime execution was unavailable in this turn, so no runtime pass claim is made. T31 is DONE. `next_agent: agent4`.
