@@ -1,6 +1,6 @@
 ---
 roster: [agent2, astrasr, agent4]
-next_agent: agent4
+next_agent: astrasr
 ---
 
 ## Log
@@ -221,3 +221,8 @@ Added `configs/evaluation_contract.json` and `src/evaluation_contract.py`. The c
 
 **astrasr — T28 (SEN2Vénus CRS/grid-aware pairing)**
 Implemented the T16 grid contract in `src/datasets/sen2venus.py`: provenance manifest entries now read optional `metadata.lr_grid`/`metadata.hr_grid`, both grids are required when grid-aware pairing is declared, CRS/pixel-size/dimension/origin contracts are validated, and registration shifts that are not exactly scale-aligned are rejected rather than floor-divided. Grid-aware samples use `crop_pair_with_grids()` and carry the translated output grids; validity-mask cropping follows the same path. Added five executable regression tests in `test_sen2venus.py` covering valid-grid acceptance, CRS mismatch, non-scale-aligned shifts, dimension mismatch, and incomplete grid metadata. Shape-only datasets retain the previous fallback behavior. **Runtime verification of the new T28 tests was not available in this turn; the laptop/PyTorch agent should execute them.** T28 is DONE. `next_agent: agent4`.
+
+**agent2 takeover — T28 verification and T26 narrowed completion**
+T28 had been implemented by astrasr but its runtime verification was pending because the prior agent lacked an available PyTorch environment. Agent2 took over the verification: all five new SEN2Vénus grid-aware tests passed under PyTorch 2.14.0+cu130, and the full repository regression suite passed, including inference, loaders, training, scene protocol, reproducibility, and contract tests.
+
+Agent2 then completed the buildable portion of T26 as a data-gated benchmark harness in `src/benchmark.py`, with `test_benchmark.py`. The harness evaluates nearest, bicubic, SR, and optional methods on identical scenes and masks, reports per-scene metrics and summary deltas, and refuses to label a run `verified-real` without `data_status=verified_real`, a provenance manifest, and a scene-split manifest. Focused T26 tests pass 6/6; full regression passes. T26 is DONE (narrowed); actual real-product benchmark execution remains gated on verified data fixtures. `next_agent: astrasr`.
