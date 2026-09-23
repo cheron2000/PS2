@@ -34,6 +34,7 @@ import numpy as np
 import torch
 
 from src.model import SRModel
+from src.telemetry import EventLogger
 
 
 def _load_json(path: Optional[str | Path]) -> Dict[str, Any]:
@@ -260,6 +261,7 @@ def predict_tiled(
     overlap: int = 64,
     max_pixels: Optional[int] = 64_000_000,
     max_bytes: Optional[int] = 4_000_000_000,
+    telemetry: Optional[EventLogger] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Run bounded overlapping inference and stitch non-overlapping core tiles.
 
@@ -308,6 +310,8 @@ def predict_tiled(
                 max_pixels=max_pixels,
                 max_bytes=max_bytes,
             )
+            if telemetry is not None:
+                telemetry.emit("tile_completed", core_y0=core_y0, core_x0=core_x0, core_height=core_y1-core_y0, core_width=core_x1-core_x0)
 
             if mean_out is None:
                 scale = tile_mean.shape[-1] // tile.shape[-1]
@@ -466,12 +470,13 @@ def main() -> None:
         help="T21: input-pixel core size for bounded tiled inference; 0 runs one full-scene pass",
     )
     parser.add_argument(
-        "--tile-overlap",
-        type=int,
-        default=64,
+        "--tile-overlap", type=int, default=64,
         help="T21: context pixels added around each tile core (default: 64)",
     )
+    parser.add_argument("--telemetry", default=None, help="optional JSONL telemetry path")
     args = parser.parse_args()
+    telemetry = EventLogger(args.telemetry)
+    telemetry.start(mode="inference", input=args.input, output=args.output, device=args.device, tiled=bool(args.tile_size))
 
     device = torch.device(args.device)
     model, config = load_checkpoint(args.checkpoint, device)
@@ -492,6 +497,7 @@ def main() -> None:
             overlap=args.tile_overlap,
             max_pixels=args.max_pixels,
             max_bytes=args.max_bytes,
+            telemetry=telemetry,
         )
     else:
         mean, variance = predict(model, data, device, max_pixels=args.max_pixels, max_bytes=args.max_bytes)
@@ -525,6 +531,7 @@ def main() -> None:
     if args.uncertainty_output:
         write_output(args.uncertainty_output, output_variance, metadata, scale)
 
+    telemetry.finish(mode="inference", input_shape=list(data.shape), output_shape=list(output.shape), uncertainty=bool(args.uncertainty_output))
     print(
         f"inference complete: input={tuple(data.shape)}, output={tuple(output.shape)}, "
         f"tiled={'yes' if args.tile_size else 'no'}, "
