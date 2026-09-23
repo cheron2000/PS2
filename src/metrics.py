@@ -44,6 +44,53 @@ def mse(prediction, target, valid_mask=None) -> float:
     p, t = _masked_values(pred, true, valid_mask)
     return float(np.mean((p - t) ** 2))
 
+def ergas(prediction, target, scale=1.0, valid_mask=None, epsilon=1e-12) -> float:
+    """ERGAS (Erreur Relative Globale Adimensionnelle de Synthèse).
+
+    Uses the standard RMSE-to-mean formulation and an explicit spatial
+    resolution scale factor. For a 4x super-resolution result, pass scale=4.
+    A shared spatial mask is applied consistently across all bands.
+    """
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError(f"scale must be finite and positive, got {scale}")
+    if epsilon <= 0 or not np.isfinite(epsilon):
+        raise ValueError("epsilon must be finite and positive")
+    pred, true = _validate_pair(prediction, target)
+    channels_p = pred[None, ...] if pred.ndim == 2 else pred
+    channels_t = true[None, ...] if true.ndim == 2 else true
+    if valid_mask is None:
+        mask = np.ones(channels_p.shape[-2:], dtype=bool)
+    else:
+        vm = np.asarray(valid_mask, dtype=bool)
+        if vm.shape == channels_p.shape[-2:]:
+            mask = vm
+        elif vm.shape == channels_p.shape:
+            mask = np.all(vm, axis=0)
+        else:
+            raise ValueError(f"valid_mask shape {vm.shape} does not match image")
+        if not np.any(mask):
+            raise ValueError("valid_mask contains no valid pixels")
+    rmse = np.sqrt(np.mean((channels_p - channels_t)[:, mask] ** 2, axis=1))
+    means = np.mean(channels_t[:, mask], axis=1)
+    relative = rmse / np.maximum(np.abs(means), epsilon)
+    return float(100.0 / scale * np.sqrt(np.mean(relative ** 2)))
+
+
+def bandwise_metrics(prediction, target, data_range=1.0, valid_mask=None) -> Dict[str, object]:
+    """Return per-band MSE, PSNR and mean target values for audit reporting."""
+    pred, true = _validate_pair(prediction, target)
+    channels_p = pred[None, ...] if pred.ndim == 2 else pred
+    channels_t = true[None, ...] if true.ndim == 2 else true
+    values = []
+    for band in range(channels_p.shape[0]):
+        band_mask = valid_mask
+        values.append({
+            "mse": mse(channels_p[band], channels_t[band], band_mask),
+            "psnr_db": psnr(channels_p[band], channels_t[band], data_range, band_mask),
+            "target_mean": float(np.mean(_masked_values(channels_t[band], channels_t[band], band_mask)[1])),
+        })
+    return {"bands": values}
+
 def psnr(prediction, target, data_range=1.0, valid_mask=None, zero_mse=math.inf) -> float:
     """Peak signal-to-noise ratio in dB."""
     if data_range <= 0 or not np.isfinite(data_range):
