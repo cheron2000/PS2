@@ -131,11 +131,24 @@ def load_checkpoint(
     narrower, explicit allowlist rather than disabling this.
     """
     try:
-        # AUDIT EXCEPTION: Streamlit's module hot-reloading creates duplicate function 
-        # objects for numpy._core.multiarray._reconstruct, causing PyTorch's safe_globals 
-        # to fail object identity checks during unpickling. Since we just trained this model 
-        # locally (runs/demo/best.pt), we explicitly trust it and fall back to False.
-        payload = torch.load(checkpoint, map_location=device, weights_only=False)
+        # Allowlist numpy types that appear in checkpoints (RNG state uses
+        # np.ndarray with uint32 dtype). This keeps weights_only=True safe
+        # while supporting our own checkpoint format.
+        import torch.serialization
+        _safe_types = [np.ndarray, np.dtype, np.empty]
+        try:
+            _safe_types.append(type(np.dtype(np.uint32)))
+            _safe_types.append(type(np.dtype(np.float32)))
+            _safe_types.append(type(np.dtype(np.float64)))
+        except Exception:
+            pass
+        try:
+            from numpy._core.multiarray import _reconstruct
+            _safe_types.append(_reconstruct)
+        except ImportError:
+            pass
+        with torch.serialization.safe_globals(_safe_types):
+            payload = torch.load(checkpoint, map_location=device, weights_only=True)
     except Exception as exc:
         raise ValueError(
             f"failed to load checkpoint safely (weights_only=True): {exc}. "

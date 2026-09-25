@@ -302,6 +302,9 @@ def main() -> None:
              "selection (default 0.2). Pass 0 to disable and fall back to "
              "training-loss-based selection explicitly, rather than by omission.",
     )
+    parser.add_argument("--nll-weight", type=float, default=0.01,
+        help="weight for the uncertainty NLL loss term (default 0.01). "
+             "BUG-009 fix: previous default of 0.1 caused mean collapse.")
     parser.add_argument("--resume", default=None, help="checkpoint to resume from")
     parser.add_argument("--telemetry", default=None, help="optional JSONL telemetry path")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -314,14 +317,19 @@ def main() -> None:
     dataset = SEN2NAIPDataset(args.data_root)
     if len(dataset) == 0:
         raise ValueError("dataset contains no trusted pairs after alignment/QC")
-    model_config = {"in_channels": 4, "out_channels": 4, "scale": dataset.scale}
+    model_config = {
+        "in_channels": 4, "out_channels": 4, "scale": dataset.scale,
+        "base_channels": 64, "num_attn_blocks": 4,
+        "window_size": 8, "num_heads": 4,
+    }
     fingerprint = dataset_fingerprint(dataset)
     run_config = vars(args).copy()
     run_config["model_config"] = model_config
     write_run_manifest(Path(args.checkpoint_dir) / "run_manifest.json", run_config, fingerprint)
     model = SRModel(**model_config)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
-    criterion = SRLoss()
+    criterion = SRLoss(nll_weight=args.nll_weight)
+    print(f"Loss weights: reconstruction=1.0, nll={args.nll_weight}")
     start_epoch = 1
     if args.resume:
         start_epoch = resume_from_checkpoint(args.resume, model, optimizer, expected_fingerprint=fingerprint)
