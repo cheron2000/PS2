@@ -384,8 +384,12 @@ class SEN2NAIPDataset(_DatasetBase):
         # never actually applied here. Fixed by passing the correct
         # reflectance_divisor per source explicitly.
         if self.normalize_method == "reflectance":
+            # Both LR (Sentinel-2) and HR (NAIP) are stored in the same
+            # reflectance DN scale (~0–10000) in SEN2NAIPv2's TACO format.
+            # Previous code incorrectly used /255 for HR assuming 8-bit NAIP
+            # DN, but the actual data uses matching units on both sides.
             lr_norm, lr_stats = normalize_bands(lr_aligned, method="reflectance", reflectance_divisor=10000.0, valid_mask=lr_mask_aligned)
-            hr_norm, hr_stats = normalize_bands(hr_aligned, method="reflectance", reflectance_divisor=255.0, valid_mask=valid_mask)
+            hr_norm, hr_stats = normalize_bands(hr_aligned, method="reflectance", reflectance_divisor=10000.0, valid_mask=valid_mask)
         else:
             # percentile/zscore adapt to each array's own statistics, so
             # applying the same method to both sides has no unit-mismatch

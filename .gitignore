@@ -2,3 +2,20 @@ __pycache__/
 *.pyc
 *.pt
 *.pth
+
+# Large data files — don't commit to GitHub
+data/sen2naip/hr/*.npy
+data/sen2naip/lr/*.npy
+data/worldcover/
+
+# Model runs and results
+runs/
+results/
+scratch/
+
+# Generated images
+*.png
+
+# OS / IDE
+.DS_Store
+Thumbs.db
