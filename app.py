@@ -149,12 +149,12 @@ def main():
 
         with col1:
             st.markdown(f"**Low-Resolution Input (Sentinel-2, 10m)**\n\nShape: `{lr_arr.shape}`")
-            st.image(to_rgb(lr_arr), use_container_width=True)
+            st.image(to_rgb(lr_arr), width="stretch")
 
         with col2:
             if hr_arr is not None:
                 st.markdown(f"**High-Resolution Ground Truth (NAIP, 2.5m)**\n\nShape: `{hr_arr.shape}`")
-                st.image(to_rgb(hr_arr), use_container_width=True)
+                st.image(to_rgb(hr_arr), width="stretch")
             else:
                 st.warning("No High-Resolution ground truth found for this sample.")
 
@@ -189,12 +189,12 @@ def main():
 
             with res_col1:
                 st.markdown("**Super-Resolved Output (Model)**")
-                st.image(to_rgb(sr_mean), use_container_width=True)
+                st.image(to_rgb(sr_mean), width="stretch")
                 st.caption(f"Display: percentile-stretched (p2–p98). Raw range: [{sr_mean.min():.3f}, {sr_mean.max():.3f}]")
 
             with res_col2:
                 st.markdown("**Uncertainty Map (Variance)**")
-                st.image(visualize_uncertainty(sr_variance), use_container_width=True)
+                st.image(visualize_uncertainty(sr_variance), width="stretch")
                 st.caption(f"Brighter = higher uncertainty. Display: log-scale p2–p98 stretch. Variance range: [{sr_variance.min():.4f}, {sr_variance.max():.4f}]")
 
             with st.expander("Debug: Array statistics"):
