@@ -108,7 +108,7 @@ def main():
     st.sidebar.header("Configuration")
 
     # Checkpoint configuration
-    checkpoint_path = "runs/real_data/best.pt"
+    checkpoint_path = "runs/fixed/best.pt"
     st.sidebar.markdown(f"**Model Checkpoint:** `{checkpoint_path}`")
 
     model, config, device = get_model(checkpoint_path)
