@@ -123,8 +123,14 @@ def write_geotiff(path: str, data: np.ndarray, transform: Affine, crs, dtype=Non
     exporting remapped/aligned label rasters for inspection."""
     if dtype is None:
         dtype = data.dtype
+    from pathlib import Path
+    import os
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
     with rasterio.open(
-        path, "w", driver="GTiff", height=data.shape[0], width=data.shape[1],
+        str(tmp_path), "w", driver="GTiff", height=data.shape[0], width=data.shape[1],
         count=1, dtype=dtype, crs=crs, transform=transform,
     ) as dst:
         dst.write(data.astype(dtype), 1)
+    os.replace(tmp_path, path)

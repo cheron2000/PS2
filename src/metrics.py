@@ -175,7 +175,7 @@ def spectral_angle_error(prediction, target, valid_mask=None, degrees=True) -> f
     t_norm = np.linalg.norm(t, axis=1)
     mask &= (p_norm > 0) & (t_norm > 0)
     if not np.any(mask):
-        raise ValueError("no non-zero spectral vectors remain after masking")
+        return float("nan")  # instead of raising when all vectors are zero
     cosine = np.sum(p[mask] * t[mask], axis=1) / (p_norm[mask] * t_norm[mask])
     angles = np.arccos(np.clip(cosine, -1.0, 1.0))
     value = float(np.mean(angles))
@@ -231,6 +231,10 @@ def spatial_alignment_check(prediction, target, max_shift=4, min_ncc=0.90, valid
             y_p, x_p, y_t, x_t = slices
             p_overlap = pred[..., y_p, x_p]
             t_overlap = true[..., y_t, x_t]
+            # Compute overlap BEFORE masking, using spatial dimensions
+            crop_h = p_overlap.shape[-2]
+            crop_w = p_overlap.shape[-1]
+            overlap = crop_h * crop_w / float(h * w)
             if alignment_mask is not None:
                 mask_overlap = alignment_mask[y_t, x_t]
                 if not np.any(mask_overlap):
@@ -238,7 +242,6 @@ def spatial_alignment_check(prediction, target, max_shift=4, min_ncc=0.90, valid
                 p_overlap = p_overlap[..., mask_overlap]
                 t_overlap = t_overlap[..., mask_overlap]
             score = _ncc(p_overlap, t_overlap)
-            overlap = p_overlap.shape[-2] * p_overlap.shape[-1] / float(h * w)
             if score > best_score or (np.isclose(score, best_score) and overlap > best_overlap):
                 best_score, best_dy, best_dx, best_overlap = score, dy, dx, overlap
     return {

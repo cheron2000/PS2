@@ -305,6 +305,14 @@ def main() -> None:
     parser.add_argument("--nll-weight", type=float, default=0.01,
         help="weight for the uncertainty NLL loss term (default 0.01). "
              "BUG-009 fix: previous default of 0.1 caused mean collapse.")
+    parser.add_argument("--base-channels", type=int, default=64,
+        help="base channel count for the model (default 64)")
+    parser.add_argument("--num-attn-blocks", type=int, default=6,
+        help="number of attention blocks in the model (default 6)")
+    parser.add_argument("--window-size", type=int, default=8,
+        help="window size for attention blocks (default 8)")
+    parser.add_argument("--num-heads", type=int, default=4,
+        help="number of attention heads (default 4)")
     parser.add_argument("--resume", default=None, help="checkpoint to resume from")
     parser.add_argument("--telemetry", default=None, help="optional JSONL telemetry path")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -318,9 +326,13 @@ def main() -> None:
     if len(dataset) == 0:
         raise ValueError("dataset contains no trusted pairs after alignment/QC")
     model_config = {
-        "in_channels": 4, "out_channels": 4, "scale": dataset.scale,
-        "base_channels": 64, "num_attn_blocks": 4,
-        "window_size": 8, "num_heads": 4,
+        "in_channels": 4,
+        "out_channels": 4,
+        "scale": dataset.scale,
+        "base_channels": args.base_channels,
+        "num_attn_blocks": args.num_attn_blocks,
+        "window_size": args.window_size,
+        "num_heads": args.num_heads,
     }
     fingerprint = dataset_fingerprint(dataset)
     run_config = vars(args).copy()

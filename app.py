@@ -64,7 +64,7 @@ def to_rgb(arr, low_pct=2, high_pct=98):
         if hi > lo:
             out[:, :, c] = (img[:, :, c] - lo) / (hi - lo)
         else:
-            out[:, :, c] = 0.0
+            out[:, :, c] = 0.5  # neutral gray for constant channels
     return np.clip(out, 0, 1)
 
 def visualize_uncertainty(variance_arr, low_pct=2, high_pct=98):
@@ -108,7 +108,7 @@ def main():
     st.sidebar.header("Configuration")
 
     # Checkpoint configuration
-    checkpoint_path = "runs/fixed/best.pt"
+    checkpoint_path = st.sidebar.text_input("Checkpoint path", value="runs/real_data/best.pt")
     st.sidebar.markdown(f"**Model Checkpoint:** `{checkpoint_path}`")
 
     model, config, device = get_model(checkpoint_path)
@@ -128,6 +128,14 @@ def main():
     # Extract clean names for the dropdown
     sample_names = [os.path.basename(f).replace('.npy', '') for f in lr_files]
     selected_sample = st.sidebar.selectbox("Select an Image Sample", sample_names)
+
+    # Clear cached results when sample changes
+    if "last_sample" not in st.session_state:
+        st.session_state["last_sample"] = selected_sample
+    if st.session_state["last_sample"] != selected_sample:
+        st.session_state.pop("sr_mean", None)
+        st.session_state.pop("sr_variance", None)
+        st.session_state["last_sample"] = selected_sample
 
     if selected_sample:
         lr_path = os.path.join(data_dir, "lr", f"{selected_sample}.npy")
@@ -165,27 +173,33 @@ def main():
 
                         # Run inference
                         sr_mean, sr_variance = predict(model, input_data, device)
-
-                        st.success("Inference Complete!")
-
-                        res_col1, res_col2 = st.columns(2)
-
-                        with res_col1:
-                            st.markdown("**Super-Resolved Output (Model)**")
-                            st.image(to_rgb(sr_mean), use_container_width=True)
-                            st.caption(f"Display: percentile-stretched (p2–p98). Raw range: [{sr_mean.min():.3f}, {sr_mean.max():.3f}]")
-
-                        with res_col2:
-                            st.markdown("**Uncertainty Map (Variance)**")
-                            st.image(visualize_uncertainty(sr_variance), use_container_width=True)
-                            st.caption(f"Brighter = higher uncertainty. Display: log-scale p2–p98 stretch. Variance range: [{sr_variance.min():.4f}, {sr_variance.max():.4f}]")
-
-                        with st.expander("Debug: Array statistics"):
-                            st.text(f"SR mean shape: {sr_mean.shape}, min: {sr_mean.min():.4f}, max: {sr_mean.max():.4f}, mean: {sr_mean.mean():.4f}")
-                            st.text(f"SR variance shape: {sr_variance.shape}, min: {sr_variance.min():.6f}, max: {sr_variance.max():.6f}")
+                        
+                        st.session_state["sr_mean"] = sr_mean
+                        st.session_state["sr_variance"] = sr_variance
 
                     except Exception as e:
                         st.error(f"An error occurred during inference: {e}")
+
+        if "sr_mean" in st.session_state and "sr_variance" in st.session_state:
+            sr_mean = st.session_state["sr_mean"]
+            sr_variance = st.session_state["sr_variance"]
+            st.success("Inference Complete!")
+
+            res_col1, res_col2 = st.columns(2)
+
+            with res_col1:
+                st.markdown("**Super-Resolved Output (Model)**")
+                st.image(to_rgb(sr_mean), use_container_width=True)
+                st.caption(f"Display: percentile-stretched (p2–p98). Raw range: [{sr_mean.min():.3f}, {sr_mean.max():.3f}]")
+
+            with res_col2:
+                st.markdown("**Uncertainty Map (Variance)**")
+                st.image(visualize_uncertainty(sr_variance), use_container_width=True)
+                st.caption(f"Brighter = higher uncertainty. Display: log-scale p2–p98 stretch. Variance range: [{sr_variance.min():.4f}, {sr_variance.max():.4f}]")
+
+            with st.expander("Debug: Array statistics"):
+                st.text(f"SR mean shape: {sr_mean.shape}, min: {sr_mean.min():.4f}, max: {sr_mean.max():.4f}, mean: {sr_mean.mean():.4f}")
+                st.text(f"SR variance shape: {sr_variance.shape}, min: {sr_variance.min():.6f}, max: {sr_variance.max():.6f}")
 
 if __name__ == "__main__":
     main()

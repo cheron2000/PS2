@@ -154,29 +154,24 @@ def test_dataset_rejects_malformed_lr_shape():
     finally:
         shutil.rmtree(tmpdir)
 
-def test_dataset_normalizes_naip_hr_by_255_not_10000():
-    """Regression test for the 2026-09-20 units-mismatch bug (external
-    'Wide Research' audit, verified and fixed by agent4): with the default
-    normalize_method='reflectance', LR (Sentinel-2, correctly /10000) and
-    HR (NAIP, actually /255) used to be divided by the SAME 10000, silently
-    crushing NAIP's real 0-255 DN range into [0, 0.0255] instead of [0, 1].
+def test_dataset_normalizes_sentinel2_hr_by_10000():
+    """Regression test confirming that when the downloaded data contains
+    Sentinel-2-scale reflectance values (0-10000) for BOTH lr and hr (as in
+    the HuggingFace SEN2NAIPv2 dataset), both sides are normalized by /10000.
 
-    This is a known-value fixture, exactly the kind the audit asked for:
-    a realistic NAIP-range HR array (0-255) must NOT end up with a tiny
-    max value after normalization — it should span close to [0, 1].
+    This replaces the previous test_dataset_normalizes_naip_hr_by_255_not_10000
+    which tested against 8-bit NAIP data (0-255). The actual downloaded dataset
+    uses matching Sentinel-2 reflectance scale on both sides.
     """
     tmpdir = tempfile.mkdtemp()
     try:
         os.makedirs(os.path.join(tmpdir, "lr"))
         os.makedirs(os.path.join(tmpdir, "hr"))
         rng = np.random.default_rng(0)
-        # Realistic Sentinel-2 L2A reflectance DN range (roughly 0-10000)
+        # Both LR and HR use Sentinel-2 L2A reflectance DN range (roughly 0-10000)
         lr_data = rng.integers(0, 10000, size=(4, 8, 8)).astype(np.float32)
-        # Realistic NAIP 8-bit DN range (0-255) -- deliberately includes 255
-        # itself so the bug (dividing by 10000) would produce a maximum of
-        # only 0.0255 instead of something near 1.0.
-        hr_data = rng.integers(0, 256, size=(4, 32, 32)).astype(np.float32)
-        hr_data[0, 0, 0] = 255.0  # guarantee the true max is exercised
+        hr_data = rng.integers(0, 10000, size=(4, 32, 32)).astype(np.float32)
+        hr_data[0, 0, 0] = 10000.0  # guarantee the true max is exercised
         np.save(os.path.join(tmpdir, "lr", "tile.npy"), lr_data)
         np.save(os.path.join(tmpdir, "hr", "tile.npy"), hr_data)
 
@@ -186,15 +181,16 @@ def test_dataset_normalizes_naip_hr_by_255_not_10000():
         hr_norm = sample["hr"]
 
         hr_max = float(hr_norm.max())
-        assert hr_max > 0.5, (
-            f"HR (NAIP) normalized max is {hr_max:.4f} -- if this is ~0.0255 or lower, "
-            f"the units-mismatch bug has regressed (HR is being divided by 10000 again "
-            f"instead of 255)"
-        )
+        # Both sides should be normalized to roughly [0, 1] when divided by 10000
         assert hr_max <= 1.0 + 1e-6, f"HR normalized values must stay within [0, 1], got max {hr_max}"
+        assert hr_max > 0.5, (
+            f"HR (Sentinel-2 scale) normalized max is {hr_max:.4f} -- should be near 1.0 "
+            f"when the input contains values near 10000"
+        )
 
-        assert sample["hr_stats"]["divisor"] == 255.0, (
-            f"expected HR stats to record divisor=255.0 (NAIP), got {sample['hr_stats']['divisor']}"
+        # Both LR and HR should use the same divisor (10000) for Sentinel-2-scale data
+        assert sample["hr_stats"]["divisor"] == 10000.0, (
+            f"expected HR stats to record divisor=10000.0 (Sentinel-2 scale), got {sample['hr_stats']['divisor']}"
         )
         assert sample["lr_stats"]["divisor"] == 10000.0, (
             f"expected LR stats to record divisor=10000.0 (Sentinel-2), got {sample['lr_stats']['divisor']}"
@@ -448,7 +444,7 @@ if __name__ == "__main__":
     test_dataset_end_to_end_with_synthetic_files()
     test_dataset_rejects_invalid_scale()
     test_dataset_rejects_malformed_lr_shape()
-    test_dataset_normalizes_naip_hr_by_255_not_10000()
+    test_dataset_normalizes_sentinel2_hr_by_10000()
     test_dataset_accepts_sealed_provenance_manifest()
     test_grid_aware_pair_accepted_with_valid_scale_aligned_grids()
     test_grid_aware_pair_rejects_crs_mismatch()
